@@ -12,12 +12,15 @@ SVM_C_FILES = svm/svm_main.c svm/svm_handlers.c svm/svm_timers.c
 UVM_C_FILES = uvm/uvm_main.c uvm/uvm_comm.c
 PROTOCOL_C_FILES = protocol/message_utils.c protocol/message_builder.c
 IO_C_FILES = io/io_common.c
+IO_C_FILES = io/io_common.c io/io_ethernet.c # Добавили io_ethernet.c
 CONFIG_C_FILES = config/config.c config/ini.c # Добавили config.c и ini.c
+
 
 # Объектные файлы (.o)
 SVM_OBJS = $(SVM_C_FILES:.c=.o)
 UVM_OBJS = $(UVM_C_FILES:.c=.o)
 PROTOCOL_OBJS = $(PROTOCOL_C_FILES:.c=.o)
+IO_OBJS = $(IO_C_FILES:.c=.o)
 IO_OBJS = $(IO_C_FILES:.c=.o)
 CONFIG_OBJS = $(CONFIG_C_FILES:.c=.o) # Добавили объекты для config
 
