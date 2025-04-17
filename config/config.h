@@ -9,20 +9,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Структура для Ethernet параметров
-typedef struct {
-    char target_ip[40]; // IP адрес SVM (для UVM) или IP для прослушивания (для SVM)
-    int port;           // Порт
-} EthernetConfig;
-
-// Структура для Serial (COM-порт) параметров
-typedef struct {
-    char device[64];    // Имя устройства (e.g., /dev/ttyS0, COM1)
-    int baud_rate;      // Скорость
-    int data_bits;      // Биты данных (обычно 8)
-    char parity[8];     // Четность ("none", "even", "odd")
-    int stop_bits;      // Стоповые биты (1 или 2)
-} SerialConfig;
+// Включаем определения интерфейсов, где теперь определены EthernetConfig и SerialConfig
+#include "../io/io_interface.h" // Путь может быть ../io/io_interface.h в зависимости от структуры include
 
 // Основная структура конфигурации
 typedef struct {
@@ -30,10 +18,10 @@ typedef struct {
     char interface_type[16]; // "ethernet" или "serial"
 
     // Секция [ethernet]
-    EthernetConfig ethernet;
+    EthernetConfig ethernet; // Тип теперь известен из io_interface.h
 
     // Секция [serial]
-    SerialConfig serial;
+    SerialConfig serial;     // Тип теперь известен из io_interface.h
 
     // Можно добавить другие секции и параметры по мере необходимости
 

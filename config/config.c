@@ -10,16 +10,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include <strings.h> // <-- Добавлено для strcasecmp
 #include "ini.h" // Подключаем заголовочный файл библиотеки inih
 
+// Вспомогательная функция stricmp больше не нужна
 
 // Обработчик для библиотеки inih
 static int config_handler(void* user, const char* section, const char* name,
                           const char* value) {
     AppConfig* pconfig = (AppConfig*)user;
 
-    #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
+    #define MATCH(s, n) strcasecmp(section, s) == 0 && strcasecmp(name, n) == 0 // Используем strcasecmp для нечувствительности к регистру
     #define MATCH_STRNCPY(dest, src, size) \
         strncpy(dest, src, size - 1); \
         dest[size - 1] = '\0'
@@ -29,7 +30,7 @@ static int config_handler(void* user, const char* section, const char* name,
     } else if (MATCH("ethernet", "target_ip")) {
         MATCH_STRNCPY(pconfig->ethernet.target_ip, value, sizeof(pconfig->ethernet.target_ip));
     } else if (MATCH("ethernet", "port")) {
-        pconfig->ethernet.port = atoi(value);
+        pconfig->ethernet.port = (uint16_t)atoi(value); // Приведение к uint16_t
     } else if (MATCH("serial", "device")) {
         MATCH_STRNCPY(pconfig->serial.device, value, sizeof(pconfig->serial.device));
     } else if (MATCH("serial", "baud_rate")) {
@@ -42,8 +43,7 @@ static int config_handler(void* user, const char* section, const char* name,
         pconfig->serial.stop_bits = atoi(value);
     } else {
         // Неизвестная секция/имя или пустая строка игнорируются
-        // Можно добавить вывод предупреждения при необходимости
-        // fprintf(stderr, "Warning: Unknown config section/name: [%s] %s\n", section, name);
+        // fprintf(stderr, "Warning: Unknown config section/name: [%s] %s = %s\n", section, name, value);
         return 1; // Возвращаем 1, чтобы парсер продолжил работу
     }
     return 1; // Успех
@@ -52,10 +52,10 @@ static int config_handler(void* user, const char* section, const char* name,
 // Функция загрузки конфигурации
 int load_config(const char *filename, AppConfig *config) {
     // 1. Установить значения по умолчанию
-    strcpy(config->interface_type, "ethernet"); // По умолчанию Ethernet
-    strcpy(config->ethernet.target_ip, "127.0.0.1");
+    strcpy(config->interface_type, "ethernet");
+    strcpy(config->ethernet.target_ip, "127.0.0.1"); // Дефолт для UVM
     config->ethernet.port = 8080;
-    strcpy(config->serial.device, "/dev/ttyS0"); // Пример для Linux
+    strcpy(config->serial.device, "/dev/ttyS0");
     config->serial.baud_rate = 115200;
     config->serial.data_bits = 8;
     strcpy(config->serial.parity, "none");
@@ -68,35 +68,39 @@ int load_config(const char *filename, AppConfig *config) {
     if (parse_result < 0) {
         if (parse_result == -1) {
             fprintf(stderr, "Warning: Config file '%s' not found or cannot be opened. Using default values.\n", filename);
-            return 0; // Файл не найден - не ошибка, используем дефолт
+            // Не считаем ошибкой, если файл не найден, используем дефолтные значения
         } else if (parse_result > 0) {
              fprintf(stderr, "Error: Parse error in config file '%s' on line %d.\n", filename, parse_result);
              return parse_result; // Возвращаем номер строки с ошибкой
         } else {
-             fprintf(stderr, "Error: Unknown error parsing config file '%s'.\n", filename);
+             fprintf(stderr, "Error: Unknown error parsing config file '%s'. Code: %d\n", filename, parse_result);
              return -1; // Другая ошибка парсинга
         }
+    } else {
+        printf("Конфигурация из файла '%s' загружена.\n", filename);
     }
 
-    // Дополнительная валидация (пример)
-    if (config->ethernet.port <= 0 || config->ethernet.port > 65535) {
-        fprintf(stderr, "Warning: Invalid ethernet port %d in config. Using default %d.\n", config->ethernet.port, 8080);
-        config->ethernet.port = 8080;
-    }
-    if (strcasecmp(config->interface_type, "ethernet") != 0 && strcasecmp(config->interface_type, "serial") != 0) { // <-- Заменить stricmp
+
+	// Дополнительная валидация (пример)
+	if (config->ethernet.port == 0) { // Убрали проверку > 65535
+		fprintf(stderr, "Warning: Invalid ethernet port %d in config. Using default %d.\n", config->ethernet.port, 8080);
+		config->ethernet.port = 8080;
+	}
+    if (strcasecmp(config->interface_type, "ethernet") != 0 && strcasecmp(config->interface_type, "serial") != 0) { // Используем strcasecmp
          fprintf(stderr, "Warning: Invalid interface_type '%s' in config. Using default 'ethernet'.\n", config->interface_type);
          strcpy(config->interface_type, "ethernet");
     }
-    // Валидация для serial->parity (пример)
-    if (strcasecmp(config->interface_type, "serial") == 0) {
-        if (strcasecmp(config->serial.parity, "none") != 0 &&
-            strcasecmp(config->serial.parity, "even") != 0 &&
-            strcasecmp(config->serial.parity, "odd") != 0) {
-            fprintf(stderr, "Warning: Invalid serial parity '%s'. Using default 'none'.\n", config->serial.parity);
-            strcpy(config->serial.parity, "none");
-        }
-    }
-    printf("Конфигурация загружена:\n");
+     if (strcasecmp(config->interface_type, "serial") == 0) {
+         if (strcasecmp(config->serial.parity, "none") != 0 &&
+             strcasecmp(config->serial.parity, "even") != 0 &&
+             strcasecmp(config->serial.parity, "odd") != 0) {
+             fprintf(stderr, "Warning: Invalid serial parity '%s'. Using default 'none'.\n", config->serial.parity);
+             strcpy(config->serial.parity, "none");
+         }
+         // Добавить валидацию для baud_rate, data_bits, stop_bits
+     }
+
+    printf("Итоговая конфигурация:\n");
     printf("  interface_type = %s\n", config->interface_type);
     if (strcasecmp(config->interface_type, "ethernet") == 0) {
         printf("  [ethernet]\n");
@@ -106,9 +110,11 @@ int load_config(const char *filename, AppConfig *config) {
         printf("  [serial]\n");
         printf("    device = %s\n", config->serial.device);
         printf("    baud_rate = %d\n", config->serial.baud_rate);
-        // ... вывод остальных serial параметров ...
+        printf("    data_bits = %d\n", config->serial.data_bits);
+        printf("    parity = %s\n", config->serial.parity);
+        printf("    stop_bits = %d\n", config->serial.stop_bits);
     }
 
 
-    return 0; // Успех
+    return 0; // Успех (даже если файл не найден и используются дефолты)
 }

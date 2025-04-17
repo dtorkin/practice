@@ -6,32 +6,31 @@
  */
 
 #include "uvm_comm.h"
-#include "../io/io_common.h"          // Для send_message, receive_full_message
+#include "../io/io_common.h"          // Для send_protocol_message, receive_protocol_message
 #include "../protocol/message_builder.h" // Для создания сообщений
 #include "../protocol/message_utils.h" // Для get_full_message_number
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> // Для sleep
-#include <string.h> // Для memcpy при обработке SDR/TSD
+#include <string.h> // Для memcpy
 
-// Константы (можно вынести в config или uvm_comm.h)
-#define DELAY_BETWEEN_MESSAGES_SEC 1 // Уменьшим для скорости тестов
+// Убрали DELAY_BETWEEN_MESSAGES_SEC, пусть main решает, нужны ли паузы
 
 // --- Функции "Запрос-Ответ" ---
 
-ConfirmInitBody* send_init_channel_and_receive_confirm(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+ConfirmInitBody* send_init_channel_and_receive_confirm(IOInterface *io, uint16_t *messageCounter, Message *receivedMessage) {
+    if (!io || io->io_handle < 0) return NULL; // Проверка дескриптора
     Message initChannelMessage = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-    if (send_message(clientSocketFD, &initChannelMessage) != 0) {
-        perror("UVM COMM: Ошибка отправки сообщения инициализации канала");
+    if (send_protocol_message(io, io->io_handle, &initChannelMessage) != 0) { // Используем новую функцию
+        fprintf(stderr, "UVM COMM: Ошибка отправки сообщения инициализации канала\n"); // Добавил UVM COMM
         return NULL;
     }
     printf("Отправлено сообщение инициализации канала\n");
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    // sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку отсюда
 
-    int recvStatus = receive_full_message(clientSocketFD, receivedMessage);
+    int recvStatus = receive_protocol_message(io, io->io_handle, receivedMessage); // Используем новую функцию
     if (recvStatus != 0) {
         if (recvStatus < 0) fprintf(stderr, "UVM COMM: Ошибка получения подтверждения инициализации.\n");
-        // Если recvStatus == 1, сообщение уже выведено в receive_full_message
         return NULL;
     }
 
@@ -44,16 +43,17 @@ ConfirmInitBody* send_init_channel_and_receive_confirm(int clientSocketFD, uint1
     return (ConfirmInitBody *)receivedMessage->body;
 }
 
-PodtverzhdenieKontrolyaBody* send_provesti_kontrol_and_receive_podtverzhdenie(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage, uint8_t tk) {
+PodtverzhdenieKontrolyaBody* send_provesti_kontrol_and_receive_podtverzhdenie(IOInterface *io, uint16_t *messageCounter, Message *receivedMessage, uint8_t tk) {
+     if (!io || io->io_handle < 0) return NULL;
     Message provestiKontrolMessage = create_provesti_kontrol_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, tk, (*messageCounter)++);
-    if (send_message(clientSocketFD, &provestiKontrolMessage) != 0) {
+    if (send_protocol_message(io, io->io_handle, &provestiKontrolMessage) != 0) { // Используем новую функцию
         perror("UVM COMM: Ошибка отправки сообщения провести контроль");
         return NULL;
     }
     printf("Отправлено сообщение провести контроль\n");
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    // sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
 
-    int recvStatus = receive_full_message(clientSocketFD, receivedMessage);
+    int recvStatus = receive_protocol_message(io, io->io_handle, receivedMessage); // Используем новую функцию
      if (recvStatus != 0) {
         if (recvStatus < 0) fprintf(stderr, "UVM COMM: Ошибка получения подтверждения контроля.\n");
         return NULL;
@@ -69,16 +69,17 @@ PodtverzhdenieKontrolyaBody* send_provesti_kontrol_and_receive_podtverzhdenie(in
 }
 
 
-RezultatyKontrolyaBody* send_vydat_rezultaty_kontrolya_and_receive_rezultaty(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage, uint8_t vpk) {
+RezultatyKontrolyaBody* send_vydat_rezultaty_kontrolya_and_receive_rezultaty(IOInterface *io, uint16_t *messageCounter, Message *receivedMessage, uint8_t vpk) {
+    if (!io || io->io_handle < 0) return NULL;
     Message vydatRezultatyKontrolyaMessage = create_vydat_rezultaty_kontrolya_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, vpk, (*messageCounter)++);
-    if (send_message(clientSocketFD, &vydatRezultatyKontrolyaMessage) != 0) {
+    if (send_protocol_message(io, io->io_handle, &vydatRezultatyKontrolyaMessage) != 0) { // Используем новую функцию
         perror("UVM COMM: Ошибка отправки сообщения выдать результаты");
         return NULL;
     }
     printf("Отправлено сообщение выдать результаты контроля\n");
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    // sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
 
-    int recvStatus = receive_full_message(clientSocketFD, receivedMessage);
+    int recvStatus = receive_protocol_message(io, io->io_handle, receivedMessage); // Используем новую функцию
     if (recvStatus != 0) {
         if (recvStatus < 0) fprintf(stderr, "UVM COMM: Ошибка получения результатов контроля.\n");
         return NULL;
@@ -94,16 +95,17 @@ RezultatyKontrolyaBody* send_vydat_rezultaty_kontrolya_and_receive_rezultaty(int
 }
 
 
-SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(IOInterface *io, uint16_t *messageCounter, Message *receivedMessage) {
+    if (!io || io->io_handle < 0) return NULL;
     Message vydatSostoyanieLiniiMessage = create_vydat_sostoyanie_linii_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-    if (send_message(clientSocketFD, &vydatSostoyanieLiniiMessage) != 0) {
+    if (send_protocol_message(io, io->io_handle, &vydatSostoyanieLiniiMessage) != 0) { // Используем новую функцию
         perror("UVM COMM: Ошибка отправки сообщения выдать состояние");
         return NULL;
     }
     printf("Отправлено сообщение выдать состояние линии\n");
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    // sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
 
-    int recvStatus = receive_full_message(clientSocketFD, receivedMessage);
+    int recvStatus = receive_protocol_message(io, io->io_handle, receivedMessage); // Используем новую функцию
     if (recvStatus != 0) {
         if (recvStatus < 0) fprintf(stderr, "UVM COMM: Ошибка получения состояния линии.\n");
         return NULL;
@@ -121,26 +123,28 @@ SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(int clie
 
 // --- Функции только для отправки ---
 
-int send_prinyat_parametry_so(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_parametry_so(IOInterface *io, uint16_t *messageCounter) {
+    if (!io || io->io_handle < 0) return -1;
 	Message msg = create_prinyat_parametry_so_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять параметры СО'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять параметры СО'\n"); // Добавил UVM COMM
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять параметры СО' с тестовыми данными\n");
 	printf("Данные тела сообщения 'Принять параметры СО' (первые 20 байт): ");
-	for (int i = 0; i < 20 && i < msg.header.body_length; ++i) { // Используем msg.header.body_length (уже в host order)
+	for (int i = 0; i < 20 && i < msg.header.body_length; ++i) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_time_ref_range(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_time_ref_range(IOInterface *io, uint16_t *messageCounter) {
+    if (!io || io->io_handle < 0) return -1;
 	Message msg = create_prinyat_time_ref_range_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять TIME_REF_RANGE'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять TIME_REF_RANGE'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять TIME_REF_RANGE'\n");
@@ -149,14 +153,15 @@ int send_prinyat_time_ref_range(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_reper(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_reper(IOInterface *io, uint16_t *messageCounter) {
+    if (!io || io->io_handle < 0) return -1;
 	Message msg = create_prinyat_reper_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять Reper'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять Reper'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять Reper'\n");
@@ -165,23 +170,19 @@ int send_prinyat_reper(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_parametry_sdr(int clientSocketFD, uint16_t *messageCounter) {
-	// ВАЖНО: create_prinyat_parametry_sdr_message возвращает только базовую часть.
-    // Здесь нужно добавить логику для добавления массива HRR, если он нужен.
-    // Пока отправляем только базовую часть для простоты.
+int send_prinyat_parametry_sdr(IOInterface *io, uint16_t *messageCounter) {
+     if (!io || io->io_handle < 0) return -1;
+    // ВАЖНО: create_prinyat_parametry_sdr_message возвращает только базовую часть.
     Message msg = create_prinyat_parametry_sdr_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-    // uint16_t mrr = ((PrinyatParametrySdrBodyBase*)msg.body)->mrr; // Получаем MRR (уже в host order)
-    // complex_fixed16_t hrr_test_data[mrr]; // Пример: создаем тестовые данные
-    // for(uint16_t i=0; i<mrr; ++i) { hrr_test_data[i] = ...; }
-    // memcpy(msg.body + sizeof(PrinyatParametrySdrBodyBase), hrr_test_data, mrr * sizeof(complex_fixed16_t));
-    // msg.header.body_length = htons(sizeof(PrinyatParametrySdrBodyBase) + mrr * sizeof(complex_fixed16_t)); // Обновляем длину
+    // TODO: Добавить логику добавления массива HRR и обновления длины тела перед отправкой
+    // ...
 
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять параметры СДР'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять параметры СДР'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять параметры СДР' c тестовыми данными (только базовая часть)\n");
@@ -190,14 +191,15 @@ int send_prinyat_parametry_sdr(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_parametry_3tso(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_parametry_3tso(IOInterface *io, uint16_t *messageCounter) {
+     if (!io || io->io_handle < 0) return -1;
 	Message msg = create_prinyat_parametry_3tso_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять параметры 3ЦО'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять параметры 3ЦО'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять параметры 3ЦО' с тестовыми данными\n");
@@ -206,14 +208,15 @@ int send_prinyat_parametry_3tso(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_ref_azimuth(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_ref_azimuth(IOInterface *io, uint16_t *messageCounter) {
+     if (!io || io->io_handle < 0) return -1;
 	Message msg = create_prinyat_ref_azimuth_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять REF_AZIMUTH'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять REF_AZIMUTH'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять REF_AZIMUTH' (длина тела: %d байт)\n", msg.header.body_length);
@@ -222,18 +225,18 @@ int send_prinyat_ref_azimuth(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_prinyat_parametry_tsd(int clientSocketFD, uint16_t *messageCounter) {
+int send_prinyat_parametry_tsd(IOInterface *io, uint16_t *messageCounter) {
+    if (!io || io->io_handle < 0) return -1;
     // ВАЖНО: create_prinyat_parametry_tsd_message возвращает только базовую часть.
-    // Нужно добавить массивы OKM, HShMR, HAR. Пока отправляем только базу.
-	Message msg = create_prinyat_parametry_tsd_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-    // Логика добавления массивов и обновления длины...
+    Message msg = create_prinyat_parametry_tsd_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
+    // TODO: Логика добавления массивов OKM, HShMR, HAR и обновления длины тела...
 
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Принять параметры ЦДР'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Принять параметры ЦДР'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Принять параметры ЦДР' с тестовыми данными (только базовая часть)\n");
@@ -242,14 +245,15 @@ int send_prinyat_parametry_tsd(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }
 
-int send_navigatsionnye_dannye(int clientSocketFD, uint16_t *messageCounter) {
+int send_navigatsionnye_dannye(IOInterface *io, uint16_t *messageCounter) {
+    if (!io || io->io_handle < 0) return -1;
 	Message msg = create_navigatsionnye_dannye_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, (*messageCounter)++);
-	if (send_message(clientSocketFD, &msg) != 0) {
-		perror("UVM COMM: Ошибка отправки сообщения 'Навигационные данные'");
+	if (send_protocol_message(io, io->io_handle, &msg) != 0) { // Используем новую функцию
+		fprintf(stderr, "UVM COMM: Ошибка отправки сообщения 'Навигационные данные'\n");
         return -1;
 	}
 	printf("Отправлено сообщение 'Навигационные данные'\n");
@@ -258,6 +262,6 @@ int send_navigatsionnye_dannye(int clientSocketFD, uint16_t *messageCounter) {
 		printf("%02X ", msg.body[i]);
 	}
 	printf("...\n");
-	sleep(DELAY_BETWEEN_MESSAGES_SEC);
+	// sleep(DELAY_BETWEEN_MESSAGES_SEC); // Убрали задержку
     return 0;
 }

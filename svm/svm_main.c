@@ -6,17 +6,18 @@
  * вызов обработчиков из диспетчера.
  */
 
-#include "../protocol/protocol_defs.h" // Определения протокола
-#include "../protocol/message_utils.h" // Утилиты
-#include "../io/io_common.h"          // Функции send/receive
-#include "../config/config.h" // <-- Добавить
-#include "svm_handlers.h"            // Обработчики и диспетчер
-#include "svm_timers.h"              // Таймеры и счетчики
+#include "../protocol/protocol_defs.h"
+#include "../protocol/message_utils.h"
+#include "../io/io_common.h"
+#include "../io/io_interface.h"      // <-- Включаем для IOInterface
+#include "../config/config.h"        // <-- Включаем для AppConfig, load_config
+#include "svm_handlers.h"
+#include "svm_timers.h"
 
-#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> // <-- Добавлено для strcasecmp
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -26,73 +27,90 @@
 #include <sys/time.h>
 
 int main() {
-	int serverSocketFD, clientSocketFD;
-	struct sockaddr_in serverAddress, clientAddress;
+	int serverSocketFD = -1, clientSocketFD = -1; // Инициализируем -1
+	struct sockaddr_in clientAddress;
 	socklen_t clientAddressLength;
-    AppConfig config; // <-- Добавить структуру конфигурации
+    AppConfig config;
+    IOInterface *io_svm = NULL; // Указатель на интерфейс IO
 
 	// --- Инициализация ---
 	printf("SVM запуск...\n");
+
     // Загрузка конфигурации
     printf("SVM: Загрузка конфигурации...\n");
     if (load_config("config.ini", &config) != 0) {
         fprintf(stderr, "SVM: Не удалось загрузить или обработать config.ini. Завершение.\n");
         exit(EXIT_FAILURE);
     }
-    // Проверка типа интерфейса (пока только Ethernet)
-    if (strcasecmp(config.interface_type, "ethernet") != 0) {
-        fprintf(stderr, "SVM: В данный момент поддерживается только 'ethernet' interface_type в config.ini.\n");
-        exit(EXIT_FAILURE);
+
+    // --- Создание и настройка интерфейса IO ---
+    if (strcasecmp(config.interface_type, "ethernet") == 0) {
+        printf("SVM: Используется Ethernet интерфейс.\n");
+        // Создаем копию Ethernet конфигурации для передачи фабрике
+        EthernetConfig eth_conf;
+        eth_conf.base.type = IO_TYPE_ETHERNET; // Устанавливаем тип явно
+        strncpy(eth_conf.target_ip, "0.0.0.0", sizeof(eth_conf.target_ip)); // SVM слушает на всех IP
+        eth_conf.target_ip[sizeof(eth_conf.target_ip)-1] = '\0';
+        eth_conf.port = config.ethernet.port;
+
+        io_svm = create_ethernet_interface(&eth_conf);
+    } else if (strcasecmp(config.interface_type, "serial") == 0) {
+        printf("SVM: Используется Serial интерфейс.\n");
+        // io_svm = create_serial_interface(&config.serial); // <- Будет добавлено позже
+        fprintf(stderr, "SVM: Serial интерфейс пока не реализован. Завершение.\n");
+         exit(EXIT_FAILURE); // Пока не реализовано
+    } else {
+         fprintf(stderr, "SVM: Неизвестный тип интерфейса '%s' в config.ini. Завершение.\n", config.interface_type);
+         exit(EXIT_FAILURE);
     }
 
-	init_message_handlers(); // Инициализация диспетчера сообщений
-
-	// --- Сетевая часть (используем значения из config) ---
-	if ((serverSocketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("Не удалось создать сокет");
-		exit(EXIT_FAILURE);
-	}
-    int opt = 1;
-    if (setsockopt(serverSocketFD, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        perror("setsockopt(SO_REUSEADDR) failed");
+    if (!io_svm) {
+         fprintf(stderr, "SVM: Не удалось создать IOInterface. Завершение.\n");
+         exit(EXIT_FAILURE);
     }
 
-	memset(&serverAddress, 0, sizeof(serverAddress));
-	serverAddress.sin_family = AF_INET;
-	serverAddress.sin_addr.s_addr = INADDR_ANY; // Слушаем на всех интерфейсах
-	serverAddress.sin_port = htons(config.ethernet.port); // <-- Используем порт из конфига
+    // Инициализация диспетчера сообщений ПОСЛЕ создания интерфейса (если он нужен)
+	init_message_handlers();
 
-	if (bind(serverSocketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
-		perror("Ошибка привязки");
-        close(serverSocketFD);
+	// --- Сетевая/Портовая часть (через интерфейс) ---
+    printf("SVM: Запуск прослушивания...\n");
+    serverSocketFD = io_svm->listen(io_svm); // Используем функцию интерфейса
+	if (serverSocketFD < 0) {
+		fprintf(stderr, "SVM: Ошибка запуска прослушивания. Завершение.\n");
+        io_svm->destroy(io_svm); // Освобождаем интерфейс
 		exit(EXIT_FAILURE);
 	}
+    // io_svm->io_handle теперь содержит слушающий дескриптор
 
-	if (listen(serverSocketFD, 1) < 0) {
-		perror("Ошибка прослушивания");
-        close(serverSocketFD);
-		exit(EXIT_FAILURE);
-	}
+	printf("SVM слушает на порту %d (handle: %d)\n", config.ethernet.port, serverSocketFD);
 
-	printf("SVM слушает на порту %d\n", config.ethernet.port); // <-- Используем порт из конфига
-
+    // --- Ожидание клиента ---
 	clientAddressLength = sizeof(clientAddress);
-	if ((clientSocketFD = accept(serverSocketFD, (struct sockaddr *)&clientAddress, &clientAddressLength)) < 0) {
-		perror("Ошибка принятия соединения");
-        close(serverSocketFD);
+    char client_ip_str[INET_ADDRSTRLEN];
+    uint16_t client_port_num;
+
+    // Используем функцию accept из интерфейса
+    clientSocketFD = io_svm->accept(io_svm, client_ip_str, sizeof(client_ip_str), &client_port_num);
+
+    // Слушающий сокет больше не нужен после принятия соединения (для одного клиента)
+    // io_svm->disconnect(io_svm, serverSocketFD); // Закрываем слушающий handle
+    // io_svm->io_handle = -1; // Сбрасываем основной handle интерфейса, т.к. он больше не слушающий
+
+    if (clientSocketFD < 0) {
+		fprintf(stderr, "SVM: Ошибка принятия соединения. Завершение.\n");
+        io_svm->destroy(io_svm); // Освобождаем интерфейс
 		exit(EXIT_FAILURE);
 	}
-	close(serverSocketFD);
 
-	char client_ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &clientAddress.sin_addr, client_ip_str, INET_ADDRSTRLEN);
-    printf("SVM принял соединение от UVM (%s:%d) (клиентский дескриптор: %d)\n",
-           client_ip_str, ntohs(clientAddress.sin_port), clientSocketFD);
+    printf("SVM принял соединение от UVM (%s:%u) (клиентский дескриптор: %d)\n",
+           client_ip_str, client_port_num, clientSocketFD);
+
 
 	// --- Запуск таймеров ---
-	if (start_timer(TIMER_INTERVAL_BCB_MS, bcbTimerHandler, SIGALRM) == -1) { // TIMER_INTERVAL_BCB_MS теперь из svm_timers.h
+	if (start_timer(TIMER_INTERVAL_BCB_MS, bcbTimerHandler, SIGALRM) == -1) {
 		fprintf(stderr, "Не удалось запустить таймер.\n");
-        close(clientSocketFD);
+        io_svm->disconnect(io_svm, clientSocketFD); // Закрываем клиента
+        io_svm->destroy(io_svm); // Освобождаем интерфейс
 		exit(EXIT_FAILURE);
 	}
 	printf("Таймер запущен.\n");
@@ -101,25 +119,27 @@ int main() {
 
 	// --- Главный цикл обработки сообщений ---
 	while (1) {
-		Message receivedMessage; // Структура для хранения полученного сообщения
+		Message receivedMessage;
 
-		int recvStatus = receive_full_message(clientSocketFD, &receivedMessage);
+        // Используем новую функцию receive_protocol_message и передаем io_svm и дескриптор клиента
+		int recvStatus = receive_protocol_message(io_svm, clientSocketFD, &receivedMessage);
 
 		if (recvStatus == -1) {
-			fprintf(stderr, "SVM: Ошибка получения сообщения. Завершение.\n");
+			fprintf(stderr, "SVM: Ошибка получения сообщения от клиента %d. Завершение.\n", clientSocketFD);
 			break; // Выход из цикла при ошибке
 		} else if (recvStatus == 1) {
-			printf("SVM: Соединение с UVM закрыто.\n");
+			printf("SVM: Соединение с UVM (клиент %d) закрыто.\n", clientSocketFD);
 			break; // Выход из цикла при закрытии соединения
 		}
 
-		// Сообщение успешно получено и преобразовано в хост-порядок
+		// Сообщение успешно получено
 		MessageHandler handler = message_handlers[receivedMessage.header.message_type];
 		if (handler != NULL) {
-			// Передаем дескриптор клиента и полученное сообщение
-            handler(clientSocketFD, &receivedMessage);
+			// Передаем io_svm и дескриптор клиента в обработчик
+            handler(io_svm, clientSocketFD, &receivedMessage);
 		} else {
-			printf("SVM: Неизвестный тип сообщения: %u (номер %u)\n",
+			printf("SVM: Неизвестный тип сообщения от клиента %d: %u (номер %u)\n",
+                   clientSocketFD,
                    receivedMessage.header.message_type,
                    get_full_message_number(&receivedMessage.header));
 		}
@@ -127,7 +147,6 @@ int main() {
         // Периодический вывод счетчиков
 		time_t currentTime = time(NULL);
 		if (currentTime - lastPrintTime >= COUNTER_PRINT_INTERVAL_SEC) {
-            // Не выводим счетчики, если только что обработали запрос на их вывод
             if (receivedMessage.header.message_type != MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
 			    print_counters();
             }
@@ -137,7 +156,10 @@ int main() {
 
 	// --- Завершение ---
 	printf("SVM завершает работу.\n");
-	close(clientSocketFD); // Закрываем сокет клиента
+    if (clientSocketFD >= 0) {
+	    io_svm->disconnect(io_svm, clientSocketFD); // Закрываем сокет клиента через интерфейс
+    }
+    io_svm->destroy(io_svm); // Освобождаем ресурсы интерфейса
 
 	return 0;
 }
