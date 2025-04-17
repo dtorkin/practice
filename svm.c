@@ -20,7 +20,11 @@ svm.c:
 #include <signal.h>
 #include <errno.h>
 #include <sys/time.h>
-#include "common.h"
+#include "common.h" // Временно для send_message
+#include "protocol/protocol_defs.h"
+#include "protocol/message_builder.h" // Нужен для создания сообщений
+#include "protocol/message_utils.h" // Нужен для get_full_message_number, message_to_host/network_byte_order
+
 
 // Константы
 #define PORT_SVM 8080
@@ -266,7 +270,7 @@ void handle_prinyat_ref_azimuth_message(int clientSocketFD, Message *receivedMes
 	printf("  ref_azimuth[0]: %d\n", body->ref_azimuth[0]);
 
 	// Можно добавить вывод последнего элемента для проверки
-	printf("  ref_azimuth[%d]: %d\n", REF_AZIMUTH_ELEMENT_COUNT - 1, body->ref_azimuth[REF_AZIMUTH_ELEMENT_COUNT - 1]);
+	printf("  ref_azimuth[%d]: %d\n", REF_AZIMUTH_SIZE - 1, body->ref_azimuth[REF_AZIMUTH_SIZE - 1]);
 
 	// Здесь будет реальная логика сохранения и использования массива ref_azimuth
 	// Например, копирование в рабочий буфер СВ-М

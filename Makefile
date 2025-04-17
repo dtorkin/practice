@@ -1,51 +1,47 @@
-# Компилятор
+# Компилятор и флаги
 CC = gcc
+CFLAGS = -Wall -Wextra -g # -Iprotocol можно добавить, если include не находит
+LDFLAGS = -lrt # Для таймеров в SVM
 
-# Флаги компиляции
-CFLAGS = -Wall -Wextra -g
+# Исходные файлы
+COMMON_SRC = common.c
+SVM_SRC = svm.c
+UVM_SRC = uvm.c
+PROTOCOL_UTILS_SRC = protocol/message_utils.c
+PROTOCOL_BUILDER_SRC = protocol/message_builder.c
+# Добавьте сюда другие .c файлы по мере их создания
 
-# Флаги для компоновщика
-LDFLAGS = -lrt  # Для работы с таймерами (timer_create)
+# Объектные файлы
+COMMON_OBJ = $(COMMON_SRC:.c=.o)
+SVM_OBJ = $(SVM_SRC:.c=.o)
+UVM_OBJ = $(UVM_SRC:.c=.o)
+PROTOCOL_UTILS_OBJ = $(PROTOCOL_UTILS_SRC:.c=.o)
+PROTOCOL_BUILDER_OBJ = $(PROTOCOL_BUILDER_SRC:.c=.o)
+# Добавьте сюда другие .o файлы
 
-# Имена исполняемых файлов
-SVM_EXEC = svm
-UVM_EXEC = uvm
+# Исполняемые файлы
+SVM_TARGET = svm
+UVM_TARGET = uvm
 
-# Список исходных файлов
-SOURCES = common.c svm.c uvm.c
-
-# Список объектных файлов
-OBJECTS = $(SOURCES:.c=.o)
-
-# Цели по умолчанию
-all: $(SVM_EXEC) $(UVM_EXEC)
+# Правило по умолчанию
+all: $(SVM_TARGET) $(UVM_TARGET)
 
 # Правило для сборки SVM
-$(SVM_EXEC): common.o svm.o
-	$(CC) common.o svm.o -o $(SVM_EXEC) $(LDFLAGS)
+$(SVM_TARGET): $(COMMON_OBJ) $(SVM_OBJ) $(PROTOCOL_UTILS_OBJ) $(PROTOCOL_BUILDER_OBJ) # Добавили зависимости
+	$(CC) $(COMMON_OBJ) $(SVM_OBJ) $(PROTOCOL_UTILS_OBJ) $(PROTOCOL_BUILDER_OBJ) -o $(SVM_TARGET) $(LDFLAGS) # Передаем все .o линковщику
 
 # Правило для сборки UVM
-$(UVM_EXEC): common.o uvm.o
-	$(CC) common.o uvm.o -o $(UVM_EXEC) $(LDFLAGS)
+$(UVM_TARGET): $(COMMON_OBJ) $(UVM_OBJ) $(PROTOCOL_UTILS_OBJ) $(PROTOCOL_BUILDER_OBJ) # Добавили зависимости
+	$(CC) $(COMMON_OBJ) $(UVM_OBJ) $(PROTOCOL_UTILS_OBJ) $(PROTOCOL_BUILDER_OBJ) -o $(UVM_TARGET) # LDFLAGS не нужен?
 
-# Правило для компиляции common.c в common.o
-common.o: common.c common.h
-	$(CC) $(CFLAGS) -c common.c -o common.o
-
-# Правило для компиляции svm.c в svm.o
-svm.o: svm.c common.h
-	$(CC) $(CFLAGS) -c svm.c -o svm.o
-
-# Правило для компиляции uvm.c в uvm.o
-uvm.o: uvm.c common.h
-	$(CC) $(CFLAGS) -c uvm.c -o uvm.o
+# Правило для компиляции .c в .o (общее правило)
+# Оно скомпилирует protocol/message_utils.c в protocol/message_utils.o
+# и protocol/message_builder.c в protocol/message_builder.o
+%.o: %.c protocol/protocol_defs.h protocol/message_utils.h protocol/message_builder.h common.h # Добавьте другие .h по мере необходимости
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Правило для очистки
 clean:
-	rm -f $(OBJECTS) $(SVM_EXEC) $(UVM_EXEC)
+	rm -f $(SVM_TARGET) $(UVM_TARGET) $(COMMON_OBJ) $(SVM_OBJ) $(UVM_OBJ) $(PROTOCOL_UTILS_OBJ) $(PROTOCOL_BUILDER_OBJ) # Добавили новые .o
 
-# Правило для пересборки всего
-rebuild: clean all
-
-# Указываем, что clean и rebuild — это не файлы
-.PHONY: all clean rebuild
+.PHONY: all clean

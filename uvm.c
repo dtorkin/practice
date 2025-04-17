@@ -16,7 +16,11 @@ uvm.c:
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include "common.h"
+#include "common.h" // Временно для send_message
+#include "protocol/protocol_defs.h"
+#include "protocol/message_builder.h" // Нужен для создания сообщений
+#include "protocol/message_utils.h" // Нужен для get_full_message_number, message_to_host/network_byte_order
+
 
 // Константы
 #define SVM_IP_ADDRESS "192.168.189.129"
@@ -412,7 +416,7 @@ int main(int argc, char* argv[] ) {
 	}
     // Доступ к данным через confirmInitBody (это указатель на тело внутри receivedMessage)
 	printf("Получено сообщение подтверждения инициализации от SVM: LAK=0x%02X, SLP=0x%02X, VDR=0x%02X, VOR1=0x%02X, VOR2=0x%02X, BCB=0x%08X\n", // Форматирование SLP, VDR и т.д. как HEX
-		   confirmInitBody->lak, confirmInitBody->slp, confirmInitBody->vdr, confirmInitBody->vor1, confirmInitBody->vor2, confirmInitBody->bcb);
+		   confirmInitBody->lak, confirmInitBody->slp, confirmInitBody->vdr, confirmInitBody->bop1, confirmInitBody->bop2, confirmInitBody->bcb);
 	printf("Счетчик BCB из подтверждения инициализации: 0x%08X\n", confirmInitBody->bcb);
 	sleep(DELAY_BETWEEN_MESSAGES_SEC);
 
@@ -442,7 +446,7 @@ int main(int argc, char* argv[] ) {
         exit(EXIT_FAILURE);
     }
 	printf("Получены результаты контроля от SVM: LAK=0x%02X, RSK=0x%02X, BCK=0x%04X, BCB=0x%08X\n", // Форматирование RSK как HEX
-		   rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->bck, rezultatyKontrolyaBody->bcb);
+		   rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->vsk, rezultatyKontrolyaBody->bcb);
 	printf("Счетчик BCB из результатов контроля: 0x%08X\n", rezultatyKontrolyaBody->bcb);
 	sleep(DELAY_BETWEEN_MESSAGES_SEC);
 
