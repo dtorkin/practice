@@ -1,5 +1,3 @@
-// svm.c
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,8 +36,10 @@ void handle_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessag
 void handle_sostoyanie_linii_136_message(int clientSocketFD, Message *receivedMessage); // Заглушка
 void handle_vydat_sostoyanie_linii_137_message(int clientSocketFD, Message *receivedMessage);
 void handle_sostoyanie_linii_138_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-// --- НОВОЕ: Прототип обработчика сообщения "Принять параметры СДР" ---
+// --- НОВОЕ: Прототипы обработчиков новых сообщений ---
 void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage);
+void handle_prinyat_parametry_tsd_message(int clientSocketFD, Message *receivedMessage);
+void handle_navigatsionnye_dannye_message(int clientSocketFD, Message *receivedMessage);
 
 
 // --- Объявление типа указателя на функцию обработчика сообщений ---
@@ -208,6 +208,18 @@ void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedM
     // Здесь будет реальная обработка сообщения "Принять параметры СДР" в будущем
 }
 
+// --- НОВОЕ: Заглушка для обработчика сообщения "Принять параметры ЦДР" ---
+void handle_prinyat_parametry_tsd_message(int clientSocketFD, Message *receivedMessage) {
+    printf("SVM получил сообщение 'Принять параметры ЦДР' (заглушка)\n");
+    // Здесь будет реальная обработка сообщения "Принять параметры ЦДР" в будущем
+}
+
+// --- НОВОЕ: Заглушка для обработчика сообщения "Навигационные данные" ---
+void handle_navigatsionnye_dannye_message(int clientSocketFD, Message *receivedMessage) {
+    printf("SVM получил сообщение 'Навигационные данные' (заглушка)\n");
+    // Здесь будет реальная обработка сообщения "Навигационные данные" в будущем
+}
+
 
 // --- Функция инициализации диспетчера сообщений ---
 void init_message_handlers() {
@@ -225,8 +237,10 @@ void init_message_handlers() {
     message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_136]      = handle_sostoyanie_linii_136_message; // Заглушка, SVM не должен получать этот тип сообщения
     message_handlers[MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII_137] = handle_vydat_sostoyanie_linii_137_message;
     message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_138]      = handle_sostoyanie_linii_138_message; // Заглушка, SVM не должен получать этот тип сообщения
-    // --- НОВОЕ: Регистрация обработчика для сообщения "Принять параметры СДР" ---
+    // --- НОВОЕ: Регистрация обработчиков для новых сообщений ---
     message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR]     = handle_prinyat_parametry_sdr_message;
+    message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_TSDR]    = handle_prinyat_parametry_tsd_message;
+    message_handlers[MESSAGE_TYPE_NAVIGATSIONNYE_DANNYE]    = handle_navigatsionnye_dannye_message;
 }
 
 

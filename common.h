@@ -1,5 +1,3 @@
-// common.h
-
 #ifndef COMMON_H
 #define COMMON_H
 
@@ -31,7 +29,10 @@ typedef enum {
     MESSAGE_TYPE_SOSTOYANIE_LINII_136      = 136, // «Состояние линии» - Заглушка для 4.2.6
     MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII_137 = 137, // «Выдать состояние линии» - Заглушка для 4.2.7
     MESSAGE_TYPE_SOSTOYANIE_LINII_138      = 138, // «Состояние линии» - Заглушка для 4.2.8
-    MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR     = 170, // «Принять параметры СДР» // Добавлено для 4.2.12
+    MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR     = 170, // «Принять параметры СДР»
+    // --- НОВЫЕ ТИПЫ СООБЩЕНИЙ ---
+    MESSAGE_TYPE_PRIYAT_PARAMETRY_TSDR    = 210, // «Принять параметры ЦДР» // Добавлено для 4.2.15
+    MESSAGE_TYPE_NAVIGATSIONNYE_DANNYE    = 255  // «Навигационные данные» // Добавлено для 4.2.16
 } MessageType;
 
 // Структура: Флаги (из таблицы 4.3)
@@ -141,6 +142,24 @@ typedef struct {
     uint16_t fixp;    // Уровень фиксированного порога (FixP)
 } PrinyatParametrySdrBody;
 
+// --- НОВОЕ: Тело сообщения "Принять параметры ЦДР" (Пункт 4.2.15) ---
+typedef struct {
+    uint16_t rezerv;     // Резерв
+    uint16_t nin;       // Количество строк дальности (Nin)
+    uint16_t nout;      // Количество строк амплитудного изображения (Nout)
+    uint16_t mrn;       // Количество отсчётов в непрореженной строке дальности (MRn)
+    uint8_t shmr;       // Максимальный модуль сдвигов отсчётов строк по дальности (ShMR)
+    uint8_t nar;        // Количество строк матрицы опор по азимуту (NAR)
+    int8_t okm[1024];    // Массив обратной коррекции миграции дальности целей OKM[Nout], assumed max Nout = 1024 for now
+    uint8_t hshmr[1024];  // Массив смещений строк по дальности HShMR[Nin], assumed max Nin = 1024 for now
+    uint8_t har[54400];  // Матрица опор по азимуту HAR[NAR, Nin], assumed max NAR*Nin = 54400 for now, using uint8_t as placeholder, will need complex fixed16 later
+} PrinyatParametryTsdBody;
+
+// --- НОВОЕ: Тело сообщения "Навигационные данные" (Пункт 4.2.16) ---
+typedef struct {
+    uint8_t mnd[256]; // Массив навигационных данных (МНД)
+} NavigatsionnyeDannyeBody;
+
 
 // Структура: Сообщение (Общая структура сообщения) (из таблицы 4.1)
 typedef struct {
@@ -160,8 +179,10 @@ Message create_sostoyanie_linii_message(LogicalAddress svm_address, uint16_t kla
 Message create_sostoyanie_linii_136_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
 Message create_vydat_sostoyanie_linii_137_message(LogicalAddress svm_address, uint16_t message_num);
 Message create_sostoyanie_linii_138_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
-// --- НОВОЕ: Прототип функции создания сообщения "Принять параметры СДР" ---
+// --- НОВОЕ: Прототипы функций создания сообщений "Принять параметры СДР", "Принять параметры ЦДР", "Навигационные данные" ---
 Message create_prinyat_parametry_sdr_message(LogicalAddress svm_address, uint16_t message_num);
+Message create_prinyat_parametry_tsd_message(LogicalAddress svm_address, uint16_t message_num);
+Message create_navigatsionnye_dannye_message(LogicalAddress svm_address, uint16_t message_num);
 
 
 // Прототипы функций: Преобразование порядка байтов

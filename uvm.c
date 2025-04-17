@@ -1,5 +1,3 @@
-// uvm.c
-
 #include "errno.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +8,7 @@
 #include "common.h"
 
 // Константы
-#define SVM_IP_ADDRESS "192.168.189.129" 
+#define SVM_IP_ADDRESS "192.168.189.129"
 #define PORT_UVM 8080
 #define DELAY_BETWEEN_MESSAGES_SEC 2
 
@@ -173,16 +171,46 @@ SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(int clie
     return (SostoyanieLiniiBody *)receivedMessage->body;
 }
 
-// --- НОВОЕ: Функция отправки сообщения "Принять параметры СДР" с тестовыми данными (Пункт 3.4.3) ---
+// Функция: Отправить сообщение "Принять параметры СДР" (Пункт 3.4.3)
 void send_prinyat_parametry_sdr(int clientSocketFD, uint16_t *messageCounter) {
     Message prinyatParametrySdrMessage = create_prinyat_parametry_sdr_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
     if (send_message(clientSocketFD, &prinyatParametrySdrMessage) != 0) {
         perror("Ошибка отправки сообщения 'Принять параметры СДР'");
     }
     printf("Отправлено сообщение 'Принять параметры СДР' c тестовыми данными\n"); // Пункт 3.4.3
-     printf("Данные тела сообщения 'Принять параметры СДР' (первые 20 байт): "); // Выводим для проверки
+    printf("Данные тела сообщения 'Принять параметры СДР' (первые 20 байт): "); // Выводим для проверки
     for (int i = 0; i < 20 && i < ntohs(prinyatParametrySdrMessage.header.body_length); ++i) {
         printf("%02X ", prinyatParametrySdrMessage.body[i]);
+    }
+    printf("...\n");
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+}
+
+// --- НОВОЕ: Функция отправки сообщения "Принять параметры ЦДР" (Пункт 3.4.3) ---
+void send_prinyat_parametry_tsd(int clientSocketFD, uint16_t *messageCounter) {
+    Message prinyatParametryTsdMessage = create_prinyat_parametry_tsd_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
+    if (send_message(clientSocketFD, &prinyatParametryTsdMessage) != 0) {
+        perror("Ошибка отправки сообщения 'Принять параметры ЦДР'");
+    }
+    printf("Отправлено сообщение 'Принять параметры ЦДР' с тестовыми данными\n"); // Пункт 3.4.3
+    printf("Данные тела сообщения 'Принять параметры ЦДР' (первые 20 байт): "); // Выводим для проверки
+    for (int i = 0; i < 20 && i < ntohs(prinyatParametryTsdMessage.header.body_length); ++i) {
+        printf("%02X ", prinyatParametryTsdMessage.body[i]);
+    }
+    printf("...\n");
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+}
+
+// --- НОВОЕ: Функция отправки сообщения "Навигационные данные" (Пункт 3.4.3) ---
+void send_navigatsionnye_dannye(int clientSocketFD, uint16_t *messageCounter) {
+    Message navigatsionnyeDannyeMessage = create_navigatsionnye_dannye_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
+    if (send_message(clientSocketFD, &navigatsionnyeDannyeMessage) != 0) {
+        perror("Ошибка отправки сообщения 'Навигационные данные'");
+    }
+    printf("Отправлено сообщение 'Навигационные данные'\n"); // Пункт 3.4.3
+    printf("Данные тела сообщения 'Навигационные данные' (первые 20 байт): "); // Выводим для проверки
+    for (int i = 0; i < 20 && i < ntohs(navigatsionnyeDannyeMessage.header.body_length); ++i) {
+        printf("%02X ", navigatsionnyeDannyeMessage.body[i]);
     }
     printf("...\n");
     sleep(DELAY_BETWEEN_MESSAGES_SEC);
@@ -271,8 +299,14 @@ int main() {
     }
     printf("\n");
 
-    // --- НОВОЕ: Фаза 5: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры СДР" (Пункт 3.4.3) ---
+    // --- Фаза 5: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры СДР" (Пункт 3.4.3) ---
     send_prinyat_parametry_sdr(clientSocketFD, &currentMessageCounter);
+
+    // --- НОВОЕ: Фаза 6: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры ЦДР" (Пункт 3.4.3) ---
+    send_prinyat_parametry_tsd(clientSocketFD, &currentMessageCounter);
+
+    // --- НОВОЕ: Фаза 7: Подготовка к сеансу съемки - Режим ДР - Отправка "Навигационные данные" (Пункт 3.4.3) ---
+    send_navigatsionnye_dannye(clientSocketFD, &currentMessageCounter);
 
 
     close(clientSocketFD);
