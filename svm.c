@@ -9,7 +9,7 @@
 #include <time.h>
 #include <signal.h>
 #include <errno.h>
-#include <sys/time.h> // Для setitimer
+#include <sys/time.h>
 #include "common.h"
 
 // Константы
@@ -18,39 +18,34 @@
 #define TIMER_INTERVAL_LINK_STATUS_MS 2000
 #define COUNTER_PRINT_INTERVAL_SEC 5
 
-// Глобальные переменные
-volatile uint32_t bcbCounter = 0;
-uint16_t linkUpChangesCounter = 0;
-uint32_t linkUpLowTimeSeconds = 0;
-uint16_t signDetChangesCounter = 0;
-SVMState currentSvmState = STATE_NOT_INITIALIZED;
-uint16_t currentMessageCounter = 0;
+SVMState currentSvmState = STATE_NOT_INITIALIZED;                       // Текущее состояние СВ-М
 
 // --- Прототипы функций-обработчиков сообщений ---
-void handle_init_channel_message(int clientSocketFD, Message *receivedMessage);
-void handle_confirm_init_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-void handle_provesti_kontrol_message(int clientSocketFD, Message *receivedMessage);
-void handle_podtverzhdenie_kontrolya_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-void handle_vydat_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage);
-void handle_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-void handle_vydat_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage);
-void handle_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-void handle_sostoyanie_linii_136_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-void handle_vydat_sostoyanie_linii_137_message(int clientSocketFD, Message *receivedMessage);
-void handle_sostoyanie_linii_138_message(int clientSocketFD, Message *receivedMessage); // Заглушка
-// --- Прототипы обработчиков новых сообщений ---
-void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_parametry_tsd_message(int clientSocketFD, Message *receivedMessage);
-void handle_navigatsionnye_dannye_message(int clientSocketFD, Message *receivedMessage);
+void handle_init_channel_message(int clientSocketFD, Message *receivedMessage);                 // 4.2.1. «Инициализация канала»
+void handle_confirm_init_message(int clientSocketFD, Message *receivedMessage);                 // 4.2.2. «Подтверждение инициализации канала» (заглушка)
+void handle_provesti_kontrol_message(int clientSocketFD, Message *receivedMessage);             // 4.2.3. «Провести контроль»
+void handle_podtverzhdenie_kontrolya_message(int clientSocketFD, Message *receivedMessage);     // 4.2.4. «Подтверждение контроля» (заглушка)
+void handle_vydat_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage);    // 4.2.5. «Выдать результаты контроля»
+void handle_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage);          // 4.2.6. «Результаты контроля» (заглушка)
+void handle_vydat_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage);       // 4.2.7. «Выдать состояние линии»
+void handle_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage);             // 4.2.8. «Состояние линии» (заглушка)
+void handle_prinyat_parametry_so_message(int clientSocketFD, Message *receivedMessage);         // 4.2.9. «Принять параметры СО» (заглушка)
+void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage);        // 4.2.12. «Принять параметры СДР» (заглушка)
+void handle_prinyat_parametry_3tso_message(int clientSocketFD, Message *receivedMessage);		// 4.2.13. «Принять параметры 3ЦО» 
+void handle_prinyat_parametry_tsd_message(int clientSocketFD, Message *receivedMessage);        // 4.2.15. «Принять параметры ЦДР» (заглушка)
+void handle_navigatsionnye_dannye_message(int clientSocketFD, Message *receivedMessage);        // 4.2.16. «Навигационные данные» (заглушка)
 
+/********************************************************************************/
+/*                               СЧЁТЧИКИ [3.3.3]                               */
+/********************************************************************************/
 
-// --- Объявление типа указателя на функцию обработчика сообщений ---
-typedef void (*MessageHandler)(int clientSocketFD, Message *message);
+uint16_t currentMessageCounter = 0;
+volatile uint32_t bcbCounter = 0;   // Счётчик времени работы СВ-М (32 бита), увеличивается каждые 50 мс.
+uint16_t linkUpChangesCounter = 0;  // Счётчик изменений состояния триггера LinkUp с «1» на «0» (16 бит)
+uint32_t linkUpLowTimeSeconds = 0;  // Время, в течение которого триггер LinkUp находился в состоянии «0» (32 бита, в секундах).
+uint16_t signDetChangesCounter = 0; // Счётчик изменений состояния триггера SignDet с «1» на «0» (16 бит).
 
-// --- Объявление массива указателей на функции обработчиков ---
-MessageHandler message_handlers[256];
-
-// Функция: Обработчик таймера BCB
+// Обработчик таймера BCB
 void bcbTimerHandler(int sig) {
     (void)sig;
     static int linkStatusTimerCounter = 0;
@@ -72,7 +67,7 @@ void bcbTimerHandler(int sig) {
     }
 }
 
-// Функция: Запуск таймера
+// Запуск таймера
 int start_timer(int interval_ms, void (*handler)(int), int sig) {
     struct sigaction sa;
     struct itimerval timer;
@@ -97,7 +92,7 @@ int start_timer(int interval_ms, void (*handler)(int), int sig) {
     return 0;
 }
 
-// Функция: Вывод счетчиков SVM
+// Вывод счетчиков SVM
 void print_counters() {
     printf("\n--- Счетчики SVM ---\n");
     printf("Счетчик BCB: 0x%08X\n", bcbCounter);
@@ -107,8 +102,11 @@ void print_counters() {
     printf("--- Конец счетчиков ---\n");
 }
 
-// --- Реализация функций-обработчиков сообщений ---
+/********************************************************************************/
+/*                        ОБРАБОТЧИКИ СООБЩЕНИЙ (handle_)                        */
+/********************************************************************************/
 
+// [4.2.1] «Инициализация канала» (обработчик сообщений)
 void handle_init_channel_message(int clientSocketFD, Message *receivedMessage) {
     printf("Получено сообщение инициализации канала\n"); // Пункт 3.2
     uint16_t receivedMessageNumber = get_full_message_number(&receivedMessage->header);
@@ -131,10 +129,12 @@ void handle_init_channel_message(int clientSocketFD, Message *receivedMessage) {
     currentSvmState = STATE_INITIALIZED;
 }
 
+// [4.2.2] «Подтверждение инициализации канала» (обработчик сообщений) - заглушка
 void handle_confirm_init_message(int clientSocketFD, Message *receivedMessage) {
     printf("SVM получил сообщение Confirm Init (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
 }
 
+// [4.2.3] «Провести контроль» (обработчик сообщений)
 void handle_provesti_kontrol_message(int clientSocketFD, Message *receivedMessage) {
     printf("Получено сообщение провести контроль\n"); // Пункт 3.3.5
     currentSvmState = STATE_SELF_TEST;
@@ -149,27 +149,30 @@ void handle_provesti_kontrol_message(int clientSocketFD, Message *receivedMessag
     printf("Отправлено сообщение подтверждения контроля\n"); // Пункт 3.3.5
 }
 
+// [4.2.4] «Подтверждение контроля» (обработчик сообщений) - заглушка
 void handle_podtverzhdenie_kontrolya_message(int clientSocketFD, Message *receivedMessage) {
      printf("SVM получил сообщение Podtverzhdenie Kontrolya (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
 }
 
+// [4.2.5] «Выдать результаты контроля» (обработчик сообщений)
 void handle_vydat_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage) {
-    printf("Получено сообщение выдать результаты контроля\n"); // Пункт 3.3.6
+    printf("Получено сообщение выдать результаты контроля\n");
 
-    uint8_t rsk = 0x01;
-    uint16_t bck = 100;
+    uint8_t rsk = 0x01; // фиксированные значения
+    uint16_t bck = 100; // фиксированные значения
     Message resultsMessage = create_rezultaty_kontrolya_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, rsk, bck, bcbCounter, currentMessageCounter++);
     if (send_message(clientSocketFD, &resultsMessage) != 0) {
         exit(EXIT_FAILURE);
     }
-    printf("Отправлено сообщение с результатами контроля\n"); // Пункт 3.3.6
+    printf("Отправлено сообщение с результатами контроля\n");
 }
 
+// [4.2.6] «Результаты контроля» (обработчик сообщений) - заглушка
 void handle_rezultaty_kontrolya_message(int clientSocketFD, Message *receivedMessage) {
      printf("SVM получил сообщение Rezultaty Kontrolya (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
 }
 
-
+// [4.2.7] «Выдать состояние линии» (обработчик сообщений)
 void handle_vydat_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage) {
     printf("Получено сообщение выдать состояние линии\n"); // Пункт 3.3.8
 
@@ -183,45 +186,53 @@ void handle_vydat_sostoyanie_linii_message(int clientSocketFD, Message *received
     printf("Отправлено сообщение состояния линии\n"); // Пункт 3.3.8
 }
 
+// [4.2.8] «Состояние линии» (обработчик сообщений) - заглушка
 void handle_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessage) {
     printf("SVM получил сообщение Sostoyanie Linii (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
 }
 
-void handle_sostoyanie_linii_136_message(int clientSocketFD, Message *receivedMessage) {
-     printf("SVM получил сообщение Sostoyanie Linii 136 (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
+// [4.2.9] «Принять параметры СО» (обработчик сообщений) - заглушка
+void handle_prinyat_parametry_so_message(int clientSocketFD, Message *receivedMessage) {
+    printf("SVM получил сообщение 'Принять параметры СО' (заглушка)\n");
+    // Здесь будет реальная обработка сообщения "Принять параметры СО" в будущем
 }
 
-void handle_vydat_sostoyanie_linii_137_message(int clientSocketFD, Message *receivedMessage) {
-    printf("Получено сообщение выдать состояние линии 137 (заглушка)\n"); // Заглушка, используется для тестирования 4.2.7
-    Message sostoyanieMessage = create_sostoyanie_linii_138_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, bcbCounter, currentMessageCounter++);
-    if (send_message(clientSocketFD, &sostoyanieMessage) != 0) {
-        exit(EXIT_FAILURE);
-    }
-    printf("Отправлено сообщение состояния линии 138 (заглушка)\n"); // Заглушка, используется для тестирования 4.2.8
-}
-
-void handle_sostoyanie_linii_138_message(int clientSocketFD, Message *receivedMessage) {
-    printf("SVM получил сообщение Sostoyanie Linii 138 (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
-}
-
-// --- Заглушка для обработчика сообщения "Принять параметры СДР" ---
+// [4.2.12] «Принять параметры СДР» (обработчик сообщений) - заглушка
 void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage) {
     printf("SVM получил сообщение 'Принять параметры СДР' (заглушка)\n");
     // Здесь будет реальная обработка сообщения "Принять параметры СДР" в будущем
 }
 
-// --- Заглушка для обработчика сообщения "Принять параметры ЦДР" ---
+// [4.2.13] «Принять параметры 3ЦО» (обработчик сообщений) - заглушка
+void handle_prinyat_parametry_3tso_message(int clientSocketFD, Message *receivedMessage) {
+    printf("SVM получил сообщение 'Принять параметры 3ЦО' (заглушка)\n");
+    // Здесь будет реальная обработка сообщения "Принять параметры 3ЦО"
+    // Нужно будет извлечь данные из receivedMessage->body, кастуя его к (PrinyatParametry3TsoBody*)
+    // и использовать эти параметры для настройки СВ-М.
+    PrinyatParametry3TsoBody *body = (PrinyatParametry3TsoBody *)receivedMessage->body;
+    printf("  Ncadr: %u\n", body->Ncadr); // Пример вывода одного поля
+    printf("  Xnum: %u\n", body->Xnum);
+    // ... (вывод других полей для отладки при необходимости) ...
+}
+
+// [4.2.15] «Принять параметры ЦДР» (обработчик сообщений) - заглушка
 void handle_prinyat_parametry_tsd_message(int clientSocketFD, Message *receivedMessage) {
     printf("SVM получил сообщение 'Принять параметры ЦДР' (заглушка)\n");
     // Здесь будет реальная обработка сообщения "Принять параметры ЦДР" в будущем
 }
 
-// --- Заглушка для обработчика сообщения "Навигационные данные" ---
+// [4.2.16] «Навигационные данные» (обработчик сообщений) - заглушка
 void handle_navigatsionnye_dannye_message(int clientSocketFD, Message *receivedMessage) {
     printf("SVM получил сообщение 'Навигационные данные' (заглушка)\n");
     // Здесь будет реальная обработка сообщения "Навигационные данные" в будущем
 }
 
+/********************************************************************************/
+/*                   ГОТОВИМ УКАЗАТЕЛИ НА ФУНКЦИИ-ОБРАБОТЧИКИ                   */
+/********************************************************************************/
+
+typedef void (*MessageHandler)(int clientSocketFD, Message *message);   // Тип указателей на функции обработчиков
+MessageHandler message_handlers[256];                                   // Массив указателей на функции обработчкиков
 
 // --- Функция инициализации диспетчера сообщений ---
 void init_message_handlers() {
@@ -236,22 +247,23 @@ void init_message_handlers() {
     message_handlers[MESSAGE_TYPE_RESULTATY_KONTROLYA]      = handle_rezultaty_kontrolya_message; // Заглушка, SVM не должен получать этот тип сообщения
     message_handlers[MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII]    = handle_vydat_sostoyanie_linii_message;
     message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII]          = handle_sostoyanie_linii_message; // Заглушка, SVM не должен получать этот тип сообщения
-    message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_136]      = handle_sostoyanie_linii_136_message; // Заглушка, SVM не должен получать этот тип сообщения
-    message_handlers[MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII_137] = handle_vydat_sostoyanie_linii_137_message;
-    message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_138]      = handle_sostoyanie_linii_138_message; // Заглушка, SVM не должен получать этот тип сообщения
-    // --- Регистрация обработчиков для новых сообщений ---
     message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR]     = handle_prinyat_parametry_sdr_message;
-    message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_TSDR]    = handle_prinyat_parametry_tsd_message;
+    message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD]    = handle_prinyat_parametry_tsd_message;
     message_handlers[MESSAGE_TYPE_NAVIGATSIONNYE_DANNYE]    = handle_navigatsionnye_dannye_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SO]      = handle_prinyat_parametry_so_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_3TSO]    = handle_prinyat_parametry_3tso_message; 
 }
 
 
 int main() {
+	/********************************************************************************/
+	/*              УСТАНАВЛИВАЕМ СОЕДИНЕНИЕ С УВМ И ЗАПУСКАЕМ ТАЙМЕРЫ              */
+	/********************************************************************************/
+
+	// --- Соединение по сети ---
     int serverSocketFD, clientSocketFD;
     struct sockaddr_in serverAddress, clientAddress;
     socklen_t clientAddressLength;
-    Message receivedMessage;
-    srand(time(NULL));
 
     if ((serverSocketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Не удалось создать сокет");
@@ -283,41 +295,88 @@ int main() {
 
     printf("SVM принял соединение от UVM\n");
 
+	// --- Запускаем таймеры ---
+    srand(time(NULL));
+
     if (start_timer(TIMER_INTERVAL_BCB_MS, bcbTimerHandler, SIGALRM) == -1) {
         fprintf(stderr, "Не удалось запустить таймер.\n");
         exit(EXIT_FAILURE);
     }
     printf("Таймер запущен.\n");
 
-    init_message_handlers(); // Инициализация диспетчера
+	time_t lastPrintTime = time(NULL);
 
-    time_t lastPrintTime = time(NULL);
+	/********************************************************************************/
+	/*              ВЗАИМОДЕЙСТВИЕ С УВМ, ОБРАБОТКА ПРИНЯТЫХ СООБЩЕНИЙ              */
+	/********************************************************************************/
+	init_message_handlers(); // Инициализация диспетчера (тот что описан выше)
+	// Message receivedMessage; // Убрали отсюда, создаем в цикле
+
     while (1) {
-        memset(&receivedMessage, 0, sizeof(Message));
+        Message receivedMessage;
+        MessageHeader header; // Буфер только для заголовка
+        ssize_t bytesRead;
+        size_t totalBytesRead;
 
-        ssize_t bytesReceived;
-        do {
-            bytesReceived = recv(clientSocketFD, &receivedMessage, sizeof(Message), 0);
-        } while (bytesReceived < 0 && errno == EINTR);
+        // --- Этап 1: Чтение заголовка ---
+        totalBytesRead = 0;
+        while (totalBytesRead < sizeof(MessageHeader)) {
+            do {
+                bytesRead = recv(clientSocketFD, ((char*)&header) + totalBytesRead, sizeof(MessageHeader) - totalBytesRead, 0);
+            } while (bytesRead < 0 && errno == EINTR);
 
-        if (bytesReceived < 0) {
-            perror("Ошибка получения данных");
-            exit(EXIT_FAILURE);
-        } else if (bytesReceived == 0) {
-            printf("Соединение закрыто UVM.\n");
-            close(clientSocketFD);
-            close(serverSocketFD);
-            exit(EXIT_SUCCESS);
-        } else if ((size_t)bytesReceived < sizeof(MessageHeader)) {
-            printf("Получен неполный заголовок сообщения.\n");
-            close(clientSocketFD);
-            close(serverSocketFD);
-            exit(EXIT_FAILURE);
+            if (bytesRead < 0) {
+                perror("Ошибка получения заголовка");
+                exit(EXIT_FAILURE);
+            } else if (bytesRead == 0) {
+                printf("Соединение закрыто UVM.\n");
+                close(clientSocketFD);
+                close(serverSocketFD);
+                exit(EXIT_SUCCESS);
+            }
+            totalBytesRead += bytesRead;
         }
 
-        message_to_host_byte_order(&receivedMessage);
+        // Копируем прочитанный заголовок в основную структуру
+        memcpy(&receivedMessage.header, &header, sizeof(MessageHeader));
 
-        // --- Диспетчеризация сообщения ---
+        // --- Этап 2: Преобразование длины тела и чтение тела ---
+        // Сначала преобразуем длину тела в host order
+        uint16_t bodyLen = ntohs(receivedMessage.header.body_length);
+
+        if (bodyLen > MAX_MESSAGE_BODY_SIZE) {
+             printf("Ошибка: Длина тела (%u) превышает максимальный размер (%d).\n", bodyLen, MAX_MESSAGE_BODY_SIZE);
+             // Можно добавить обработку ошибки, например, пропуск сообщения или разрыв соединения
+             continue; // Пропустить это сообщение
+        }
+
+        // Читаем тело сообщения нужной длины
+        totalBytesRead = 0;
+        while (totalBytesRead < bodyLen) {
+            do {
+                bytesRead = recv(clientSocketFD, receivedMessage.body + totalBytesRead, bodyLen - totalBytesRead, 0);
+            } while (bytesRead < 0 && errno == EINTR);
+
+            if (bytesRead < 0) {
+                perror("Ошибка получения тела сообщения");
+                // Можно решить разорвать соединение или пропустить сообщение
+                exit(EXIT_FAILURE); // Пример: завершение при ошибке чтения тела
+            } else if (bytesRead == 0) {
+                printf("Соединение закрыто UVM во время чтения тела.\n");
+                close(clientSocketFD);
+                close(serverSocketFD);
+                exit(EXIT_SUCCESS);
+            }
+            totalBytesRead += bytesRead;
+        }
+
+        // --- Этап 3: Полная обработка сообщения ---
+        // Теперь у нас есть полный заголовок и тело. Выполняем преобразование для остальных полей.
+        // Восстанавливаем body_length в host order для остальной логики (т.к. message_to_host_byte_order ожидает network order)
+        receivedMessage.header.body_length = htons(bodyLen); // Временно возвращаем в network order для функции
+        message_to_host_byte_order(&receivedMessage); // Теперь преобразуем остальные поля
+
+        // Вызываем обработчик
         MessageHandler handler = message_handlers[receivedMessage.header.message_type];
         if (handler != NULL) {
             handler(clientSocketFD, &receivedMessage);
@@ -325,13 +384,15 @@ int main() {
             printf("SVM: Неизвестный тип сообщения: %u\n", receivedMessage.header.message_type);
         }
 
-        // --- Фаза 2: Вывод счетчиков (при необходимости) ---
+		// Переодический вызов счётчиков (зависит от COUNTER_PRINT_INTERVAL_SEC)
         time_t currentTime = time(NULL);
-        if (currentTime - lastPrintTime >= COUNTER_PRINT_INTERVAL_SEC && receivedMessage.header.message_type != MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+        // Проверяем, что тип не Vydat Sostoyanie Linii, чтобы избежать двойного вывода
+        if (currentTime - lastPrintTime >= COUNTER_PRINT_INTERVAL_SEC &&
+            receivedMessage.header.message_type != MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
             print_counters();
             lastPrintTime = currentTime;
         }
-        sleep(1);
+        // Убрал sleep(1) отсюда, так как recv теперь блокирующий и ждет данных
     }
 
     close(clientSocketFD);
