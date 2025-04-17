@@ -1,6 +1,6 @@
 // uvm.c
 
-#include <errno.h>
+#include "errno.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 #include "common.h"
 
 // Константы
-#define SVM_IP_ADDRESS "127.0.0.1" // Изменено на localhost для теста
+#define SVM_IP_ADDRESS "192.168.189.129" 
 #define PORT_UVM 8080
 #define DELAY_BETWEEN_MESSAGES_SEC 2
 
@@ -173,6 +173,22 @@ SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(int clie
     return (SostoyanieLiniiBody *)receivedMessage->body;
 }
 
+// --- НОВОЕ: Функция отправки сообщения "Принять параметры СДР" с тестовыми данными (Пункт 3.4.3) ---
+void send_prinyat_parametry_sdr(int clientSocketFD, uint16_t *messageCounter) {
+    Message prinyatParametrySdrMessage = create_prinyat_parametry_sdr_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
+    if (send_message(clientSocketFD, &prinyatParametrySdrMessage) != 0) {
+        perror("Ошибка отправки сообщения 'Принять параметры СДР'");
+    }
+    printf("Отправлено сообщение 'Принять параметры СДР' c тестовыми данными\n"); // Пункт 3.4.3
+     printf("Данные тела сообщения 'Принять параметры СДР' (первые 20 байт): "); // Выводим для проверки
+    for (int i = 0; i < 20 && i < ntohs(prinyatParametrySdrMessage.header.body_length); ++i) {
+        printf("%02X ", prinyatParametrySdrMessage.body[i]);
+    }
+    printf("...\n");
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+}
+
+
 int main() {
     int clientSocketFD;
     struct sockaddr_in serverAddress;
@@ -210,7 +226,7 @@ int main() {
         close(clientSocketFD);
         exit(EXIT_FAILURE);
     }
-    printf("Получено сообщение подтверждения инициализации от SVM: LAK=0x%02X, SLP=0x%02X, VDR=0x%02X, VOR1=0x%02X, VOR2=0x%02X, BCB=0x%08X\n", // Пункт 4.2.2
+    printf("Получено сообщение подтверждения инициализации от SVM: LAK=0x%02X, SLP=0x%03, VDR=0x01, VOR1=0x02, VOR2=0x03, BCB=0x%08X\n", // Пункт 4.2.2
            confirmInitBody->lak, confirmInitBody->slp, confirmInitBody->vdr, confirmInitBody->vor1, confirmInitBody->vor2, confirmInitBody->bcb);
     printf("Счетчик BCB из подтверждения инициализации: 0x%08X\n", confirmInitBody->bcb); // Пункт 4.2.2
     sleep(DELAY_BETWEEN_MESSAGES_SEC);
@@ -234,7 +250,7 @@ int main() {
         close(clientSocketFD);
         exit(EXIT_FAILURE);
     }
-    printf("Получены результаты контроля от SVM: LAK=0x%02X, RSK=0x%02X, BCK=0x%04X, BCB=0x%08X\n", // Пункт 4.2.6
+    printf("Получены результаты контроля от SVM: LAK=0x%02X, RSK=0x%01, BCK=0x%04X, BCB=0x%08X\n", // Пункт 4.2.6
            rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->bck, rezultatyKontrolyaBody->bcb);
     printf("Счетчик BCB из результатов контроля: 0x%08X\n", rezultatyKontrolyaBody->bcb); // Пункт 4.2.6
     sleep(DELAY_BETWEEN_MESSAGES_SEC);
@@ -246,7 +262,7 @@ int main() {
         close(clientSocketFD);
         exit(EXIT_FAILURE);
     }
-    printf("Получено состояние линии от SVM: LAK=0x%02X, KLA=0x%04X, SLA=0x%08X, KSA=0x%04X, BCB=0x%08X\n", // Пункт 4.2.8
+    printf("Получено сообщение состояния линии от SVM: LAK=0x%02X, KLA=0x%04X, SLA=0x%08X, KSA=0x%04X, BCB=0x%08X\n", // Пункт 4.2.8
            sostoyanieLiniiBody->lak, sostoyanieLiniiBody->kla, sostoyanieLiniiBody->sla, sostoyanieLiniiBody->ksa, sostoyanieLiniiBody->bcb);
     printf("Счетчик BCB из состояния линии: 0x%08X\n", sostoyanieLiniiBody->bcb); // Пункт 4.2.8
     printf("Сырые данные тела (первые 10 байт) состояния линии: "); // Пункт 4.2.8
@@ -254,6 +270,10 @@ int main() {
         printf("%02X ", receivedMessage.body[i]);
     }
     printf("\n");
+
+    // --- НОВОЕ: Фаза 5: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры СДР" (Пункт 3.4.3) ---
+    send_prinyat_parametry_sdr(clientSocketFD, &currentMessageCounter);
+
 
     close(clientSocketFD);
     return 0;

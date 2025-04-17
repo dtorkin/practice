@@ -243,9 +243,67 @@ Message create_sostoyanie_linii_138_message(LogicalAddress svm_address, uint32_t
     return message;
 }
 
+// --- НОВОЕ: Функция создания сообщения "Принять параметры СДР" (Пункт 4.2.12) ---
+Message create_prinyat_parametry_sdr_message(LogicalAddress svm_address, uint16_t message_num) {
+    Message message;
+    memset(&message, 0, sizeof(Message));
+
+    message.header.address = svm_address;
+    message.header.flags.np = 0;
+    message.header.flags.hc_t_bp = (message_num >> 8) & 0x01;
+    message.header.flags.hc_ct_bp = (message_num >> 9) & 0x01;
+    message.header.flags.hc_ct10p = (message_num >> 10) & 0x01;
+    message.header.body_length = htons(sizeof(PrinyatParametrySdrBody));
+    message.header.message_number = message_num & 0xFF;
+    message.header.message_type = MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR; // Используем добавленный тип
+
+    PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message.body;
+    body->pp_nl = 0x01;        // Пример режима работы РСА и номера луча
+    body->brl = 0x07;         // Пример маски бланкирования
+    body->kdec = 0x02;        // Пример коэффициента прореживания
+    body->yo = 0x01;          // Пример уровня обработки
+    body->sland = 0x10;       // Пример доли суши
+    body->sf = 0x05;          // Пример доли НК
+    body->t0 = 0x20;          // Пример порога суши
+    body->t1 = 0x15;          // Пример порога НК на море
+    body->q0 = 0x03;          // Пример порога помехи
+    body->q = htons(1500);     // Пример нормализованной константы шума
+    body->aru = 0x01;         // Пример режима работы АРУ
+    body->karu = 0x0A;        // Пример константы кода аттенюации устр-ва МПУ 11B521-4 в режиме внешнего кода АРУ (KARU)
+    body->sigmaybm = htons(2500); // Пример константы номинального среднеквадратичного уровня шума на выходе устройства МПУ 11B521-4 (SIGMAYBM)
+    body->kw = 0x01;          // Пример кода включения взвешивания
+    for (int i = 0; i < 23; ++i) { // Заполнение массива W[23] примерами данных
+        body->w_23[i] = 0x0F + i;
+    }
+    body->nfft = htons(128);    // Пример количества отсчётов БПФ
+    body->or_param = 0x08;      // Пример размера ячейки OR
+    body->oa = 0x0A;          // Пример размера ячейки OA
+    body->mrr = htons(500);     // Пример количества отсчетов в опоре
+    body->fixp = htons(100);    // Пример уровня фиксированного порога
+
+
+    return message;
+}
+
+
 // Функция: Преобразовать сообщение в сетевой порядок байтов (Network Byte Order)
 void message_to_network_byte_order(Message *message) {
     message->header.body_length = htons(message->header.body_length);
+     if (message->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
+        RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody *)message->body;
+        body->bck = htons(body->bck);
+    } else if (message->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
+        SostoyanieLiniiBody *body = (SostoyanieLiniiBody *)message->body;
+        body->kla = htons(body->kla);
+        body->ksa = htons(body->ksa);
+    }  else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {
+        PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
+        body->q = htons(body->q);
+        body->sigmaybm = htons(body->sigmaybm);
+        body->nfft = htons(body->nfft);
+        body->mrr = htons(body->mrr);
+        body->fixp = htons(body->fixp);
+    }
 }
 
 // Функция: Преобразовать сообщение в порядок байтов хоста (Host Byte Order)
@@ -273,6 +331,13 @@ void message_to_host_byte_order(Message *message) {
     } else if (message->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII_138) {
         SostoyanieLinii138Body *body = (SostoyanieLinii138Body *)message->body;
         body->bcb = ntohl(body->bcb);
+    }  else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {
+        PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
+        body->q = ntohs(body->q);
+        body->sigmaybm = ntohs(body->sigmaybm);
+        body->nfft = ntohs(body->nfft);
+        body->mrr = ntohs(body->mrr);
+        body->fixp = ntohs(body->fixp);
     }
 }
 

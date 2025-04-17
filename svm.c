@@ -38,6 +38,9 @@ void handle_sostoyanie_linii_message(int clientSocketFD, Message *receivedMessag
 void handle_sostoyanie_linii_136_message(int clientSocketFD, Message *receivedMessage); // Заглушка
 void handle_vydat_sostoyanie_linii_137_message(int clientSocketFD, Message *receivedMessage);
 void handle_sostoyanie_linii_138_message(int clientSocketFD, Message *receivedMessage); // Заглушка
+// --- НОВОЕ: Прототип обработчика сообщения "Принять параметры СДР" ---
+void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage);
+
 
 // --- Объявление типа указателя на функцию обработчика сообщений ---
 typedef void (*MessageHandler)(int clientSocketFD, Message *message);
@@ -199,6 +202,12 @@ void handle_sostoyanie_linii_138_message(int clientSocketFD, Message *receivedMe
     printf("SVM получил сообщение Sostoyanie Linii 138 (не ожидается)\n"); // Заглушка, SVM не должен получать этот тип сообщения
 }
 
+// --- НОВОЕ: Заглушка для обработчика сообщения "Принять параметры СДР" ---
+void handle_prinyat_parametry_sdr_message(int clientSocketFD, Message *receivedMessage) {
+    printf("SVM получил сообщение 'Принять параметры СДР' (заглушка)\n");
+    // Здесь будет реальная обработка сообщения "Принять параметры СДР" в будущем
+}
+
 
 // --- Функция инициализации диспетчера сообщений ---
 void init_message_handlers() {
@@ -216,6 +225,8 @@ void init_message_handlers() {
     message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_136]      = handle_sostoyanie_linii_136_message; // Заглушка, SVM не должен получать этот тип сообщения
     message_handlers[MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII_137] = handle_vydat_sostoyanie_linii_137_message;
     message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII_138]      = handle_sostoyanie_linii_138_message; // Заглушка, SVM не должен получать этот тип сообщения
+    // --- НОВОЕ: Регистрация обработчика для сообщения "Принять параметры СДР" ---
+    message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR]     = handle_prinyat_parametry_sdr_message;
 }
 
 

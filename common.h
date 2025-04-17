@@ -31,6 +31,7 @@ typedef enum {
     MESSAGE_TYPE_SOSTOYANIE_LINII_136      = 136, // «Состояние линии» - Заглушка для 4.2.6
     MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII_137 = 137, // «Выдать состояние линии» - Заглушка для 4.2.7
     MESSAGE_TYPE_SOSTOYANIE_LINII_138      = 138, // «Состояние линии» - Заглушка для 4.2.8
+    MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR     = 170, // «Принять параметры СДР» // Добавлено для 4.2.12
 } MessageType;
 
 // Структура: Флаги (из таблицы 4.3)
@@ -54,7 +55,7 @@ typedef struct {
     uint8_t message_type;    // Тип сообщения (1 байт)
 } MessageHeader;
 
-// Структуры: Тела сообщений (из разделов 4.2.1 - 4.2.8)
+// Структуры: Тела сообщений (из разделов 4.2.1 - 4.2.12)
 typedef struct {
     uint8_t lauvm; // Логический адрес УВМ
     uint8_t lak;   // Логический адрес СВ-М
@@ -116,6 +117,31 @@ typedef struct {
     uint32_t bcb;         // Состояние ВСВ (BCB) - Заглушка для 4.2.8
 } SostoyanieLinii138Body;
 
+// --- НОВОЕ: Тело сообщения "Принять параметры СДР" (Пункт 4.2.12) ---
+typedef struct {
+    uint8_t pp_nl;    // Режим работы РСА и номер луча (РР и НЛ)
+    uint8_t brl;      // Маска бланкирования рабочих лучей (БРЛ)
+    uint8_t kdec;     // Коэффициент прореживания (KDEC)
+    uint8_t yo;       // Уровень обработки (УО)
+    uint8_t sland;    // Доля площади ячейки, занимаемая сушей (SLand)
+    uint8_t sf;       // Доля площади ячейки, занимаемая НК (SF)
+    uint8_t t0;       // Коэффициент порогового обнаружения суши (t0)
+    uint8_t t1;       // Коэффициент порогового обнаружения НК на море (t1)
+    uint8_t q0;       // Пороговая константа обнаружения активной помехи (Qo)
+    uint16_t q;        // Нормализованная константа для сигмы шума (Q)
+    uint8_t aru;      // Режим работы АРУ устройства МПУ 11B521-4 (ARU)
+    uint8_t karu;     // Константа значения кода аттенюации устр-ва МПУ 11B521-4 в режиме внешнего кода АРУ (KARU)
+    uint16_t sigmaybm; // Константа номинального среднеквадратичного уровня шума на выходе устройства МПУ 11B521-4 (SIGMAYBM)
+    uint8_t kw;       // Код включения взвешивания (KW)
+    uint8_t w_23[23]; // Массив коэффициентов взвешивающего фильтра W[23]
+    uint16_t nfft;    // Количество отсчётов БПФ (NFFT)
+    uint8_t or_param; // Размер ячейки порогового обнаружителя в отсчётах по дальности (OR)
+    uint8_t oa;       // Размер ячейки порогового обнаружителя в отсчётах по азимуту (ОА)
+    uint16_t mrr;     // Количество отсчетов в опоре по дальности (MRR)
+    uint16_t fixp;    // Уровень фиксированного порога (FixP)
+} PrinyatParametrySdrBody;
+
+
 // Структура: Сообщение (Общая структура сообщения) (из таблицы 4.1)
 typedef struct {
     MessageHeader header;
@@ -134,6 +160,9 @@ Message create_sostoyanie_linii_message(LogicalAddress svm_address, uint16_t kla
 Message create_sostoyanie_linii_136_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
 Message create_vydat_sostoyanie_linii_137_message(LogicalAddress svm_address, uint16_t message_num);
 Message create_sostoyanie_linii_138_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
+// --- НОВОЕ: Прототип функции создания сообщения "Принять параметры СДР" ---
+Message create_prinyat_parametry_sdr_message(LogicalAddress svm_address, uint16_t message_num);
+
 
 // Прототипы функций: Преобразование порядка байтов
 uint16_t get_full_message_number(const MessageHeader *header);
