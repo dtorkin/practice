@@ -2,191 +2,353 @@
  * uvm/uvm_main.c
  *
  * Описание:
- * Основной файл UVM: инициализация, загрузка конфигурации,
- * создание и подключение через IOInterface, вызов функций взаимодействия.
+ * Основной файл UVM: инициализация, создание потоков (отправитель, приемник),
+ * управление логикой взаимодействия через очереди.
  */
 
 #include "../protocol/protocol_defs.h"
-#include "../protocol/message_utils.h"
-#include "../io/io_common.h"
-#include "../io/io_interface.h"      // <--- Для IOInterface, EthernetConfig, SerialConfig
-#include "../config/config.h"        // <--- Для AppConfig, load_config
-#include "uvm_comm.h"
+#include "../protocol/message_utils.h" // Для get_full_message_number
+#include "../io/io_common.h"           // Для receive_protocol_message (хотя он в receiver потоке)
+#include "../io/io_interface.h"
+#include "../config/config.h"
+#include "../utils/ts_queue_req.h"     // Очередь запросов
+#include "../utils/ts_queue.h"         // Очередь ответов/сообщений
+#include "uvm_types.h"                 // Для UvmRequest
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h> // для strcasecmp
-#include <unistd.h>
-// #include <arpa/inet.h>   // Больше не нужны здесь
-// #include <netinet/in.h>
+#include <unistd.h>  // для sleep/usleep, close
+#include <arpa/inet.h> // Для inet_ntop и т.д. если нужно будет выводить IP
+#include <netinet/in.h>
+#include <sys/socket.h> // Для shutdown, SHUT_RDWR
 #include <errno.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <signal.h>
+#include <time.h>   // Для clock_gettime, time
 
-#define DELAY_BETWEEN_MESSAGES_SEC 1
+// --- Глобальные переменные для UVM ---
+IOInterface *io_uvm = NULL;
+ThreadSafeReqQueue *uvm_outgoing_request_queue = NULL;
+ThreadSafeQueue    *uvm_incoming_response_queue = NULL;
+volatile bool uvm_keep_running = true;
+int uvm_comm_handle = -1; // Дескриптор соединения
+
+// --- Глобальные переменные для синхронизации Main и Sender ---
+pthread_mutex_t uvm_send_counter_mutex;
+pthread_cond_t  uvm_send_counter_cond;
+volatile int    uvm_outstanding_sends = 0; // Счетчик неотправленных сообщений
+
+// --- Прототипы потоков ---
+extern void* uvm_sender_thread_func(void* arg);
+extern void* uvm_receiver_thread_func(void* arg);
+
+// --- Обработчик сигналов ---
+void uvm_handle_shutdown_signal(int sig) {
+    const char msg_int[] = "\nUVM: Получен сигнал SIGINT. Завершение...\n";
+    const char msg_term[] = "\nUVM: Получен сигнал SIGTERM. Завершение...\n";
+    const char msg_unknown[] = "\nUVM: Получен неизвестный сигнал. Завершение...\n";
+    const char *msg_ptr = (sig == SIGINT) ? msg_int : (sig == SIGTERM ? msg_term : msg_unknown);
+    write(STDOUT_FILENO, msg_ptr, strlen(msg_ptr));
+
+    uvm_keep_running = false;
+    // Будим потоки, которые могут спать
+    if (uvm_outgoing_request_queue) queue_req_shutdown(uvm_outgoing_request_queue);
+    if (uvm_incoming_response_queue) queue_shutdown(uvm_incoming_response_queue);
+    // Закрытие сокета произойдет в cleanup в main
+}
+
+// --- Вспомогательная функция для отправки запроса ---
+bool send_uvm_request(UvmRequestType type, uint8_t param1) {
+    if (!uvm_outgoing_request_queue || !uvm_keep_running) return false;
+    UvmRequest req;
+    memset(&req, 0, sizeof(req)); // Обнуляем структуру
+    req.type = type;
+    if (type == UVM_REQ_PROVESTI_KONTROL) req.tk_param = param1;
+    else if (type == UVM_REQ_VYDAT_REZULTATY) req.vpk_param = param1;
+
+    pthread_mutex_lock(&uvm_send_counter_mutex);
+    if (!queue_req_enqueue(uvm_outgoing_request_queue, &req)) {
+        pthread_mutex_unlock(&uvm_send_counter_mutex);
+        fprintf(stderr, "UVM Main: Не удалось добавить запрос %d в очередь.\n", type);
+        if (uvm_keep_running) uvm_keep_running = false;
+        return false;
+    }
+    uvm_outstanding_sends++;
+    pthread_mutex_unlock(&uvm_send_counter_mutex);
+    return true;
+}
+
+// --- Вспомогательная функция для ожидания ответа ---
+bool wait_for_response(MessageType expected_type, Message *response_msg, int timeout_sec) {
+    if (!uvm_incoming_response_queue || !uvm_keep_running) return false;
+
+    time_t start_time = time(NULL);
+    while (uvm_keep_running) {
+        if (queue_dequeue(uvm_incoming_response_queue, response_msg)) {
+            if (response_msg->header.message_type == expected_type) {
+                return true; // Получили нужный ответ
+            } else {
+                printf("UVM Main: Получено неожиданное сообщение тип %u (ожидалось %u).\n",
+                       response_msg->header.message_type, expected_type);
+                // TODO: Обработать или проигнорировать
+            }
+        } else {
+             if (!uvm_keep_running && uvm_incoming_response_queue->count == 0) {
+                 fprintf(stderr,"UVM Main: Очередь ответов закрыта во время ожидания типа %u.\n", expected_type);
+                 return false;
+             }
+             // Иначе ложное пробуждение или ошибка dequeue - продолжаем ждать
+        }
+
+        if (timeout_sec > 0 && (time(NULL) - start_time) > timeout_sec) {
+            fprintf(stderr, "UVM Main: Таймаут ожидания ответа типа %u.\n", expected_type);
+            return false;
+        }
+        usleep(50000); // Пауза, чтобы не грузить CPU
+    }
+    fprintf(stderr,"UVM Main: Ожидание ответа типа %u прервано сигналом завершения.\n", expected_type);
+    return false; // Вышли из цикла из-за uvm_keep_running == false
+}
+
 
 int main(int argc, char* argv[] ) {
-	int comm_handle = -1; // Дескриптор соединения/порта
-	uint16_t currentMessageCounter = 0;
-	Message receivedMessage;
     AppConfig config;
-    IOInterface *io_uvm = NULL; // Указатель на интерфейс IO
+    pthread_t sender_tid = 0, receiver_tid = 0;
+    int exit_code = EXIT_SUCCESS; // Код возврата программы
 
-	// --- Загрузка конфигурации ---
-    printf("UVM: Загрузка конфигурации...\n");
-    if (load_config("config.ini", &config) != 0) {
-        // load_config уже выводит сообщение об ошибке
-        exit(EXIT_FAILURE);
-    }
+	// --- Инициализация ---
+	printf("UVM: Загрузка конфигурации...\n");
+    if (load_config("config.ini", &config) != 0) { exit(EXIT_FAILURE); }
 
-    // --- Создание интерфейса IO на основе конфигурации ---
-    printf("UVM: Создание интерфейса типа '%s'...\n", config.interface_type);
-    if (strcasecmp(config.interface_type, "ethernet") == 0) {
-        io_uvm = create_ethernet_interface(&config.ethernet);
-    } else if (strcasecmp(config.interface_type, "serial") == 0) {
-        io_uvm = create_serial_interface(&config.serial);
-    } else {
-         fprintf(stderr, "UVM: Неподдерживаемый тип интерфейса '%s' в config.ini.\n", config.interface_type);
-         exit(EXIT_FAILURE);
-    }
+    if (pthread_mutex_init(&uvm_send_counter_mutex, NULL) != 0) { perror("UVM: Failed to init send counter mutex"); exit(EXIT_FAILURE); }
+    if (pthread_cond_init(&uvm_send_counter_cond, NULL) != 0) { perror("UVM: Failed to init send counter cond var"); pthread_mutex_destroy(&uvm_send_counter_mutex); exit(EXIT_FAILURE); }
 
-    if (!io_uvm) {
-         fprintf(stderr, "UVM: Не удалось создать IOInterface. Завершение.\n");
-         exit(EXIT_FAILURE);
-    }
+    printf("UVM: Создание интерфейса типа '%s'...\n");
+    if (strcasecmp(config.interface_type, "ethernet") == 0) { io_uvm = create_ethernet_interface(&config.ethernet); }
+    else if (strcasecmp(config.interface_type, "serial") == 0) { io_uvm = create_serial_interface(&config.serial); }
+    else { fprintf(stderr, "UVM: Неподдерживаемый тип интерфейса '%s'.\n", config.interface_type); goto cleanup; } // Используем cleanup
+    if (!io_uvm) { fprintf(stderr, "UVM: Не удалось создать IOInterface.\n"); goto cleanup; } // Используем cleanup
+
+    uvm_outgoing_request_queue = queue_req_create(50);
+    uvm_incoming_response_queue = queue_create(50);
+    if (!uvm_outgoing_request_queue || !uvm_incoming_response_queue) { fprintf(stderr, "UVM: Не удалось создать очереди.\n"); goto cleanup; }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = uvm_handle_shutdown_signal;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 
 	// --- Выбор режима работы ---
-	RadarMode selectedMode = MODE_DR; // Режим по умолчанию
+	RadarMode selectedMode = MODE_DR; // Режим по умолчанию - ДР
 	if (argc > 1) {
-        if (strcasecmp(argv[1], "OR") == 0) selectedMode = MODE_OR;
-		else if (strcasecmp(argv[1], "OR1") == 0) selectedMode = MODE_OR1;
-		else if (strcasecmp(argv[1], "DR") == 0) selectedMode = MODE_DR;
-		else if (strcasecmp(argv[1], "VR") == 0) selectedMode = MODE_VR;
+		if (strcmp(argv[1], "OR") == 0) selectedMode = MODE_OR;
+		else if (strcmp(argv[1], "OR1") == 0) selectedMode = MODE_OR1;
+		else if (strcmp(argv[1], "DR") == 0) selectedMode = MODE_DR;
+		else if (strcmp(argv[1], "VR") == 0) selectedMode = MODE_VR;
 		else {
 			fprintf(stderr, "Неверный режим работы. Используйте OR, OR1, DR или VR.\n");
-            io_uvm->destroy(io_uvm); // Освобождаем интерфейс перед выходом
 			exit(EXIT_FAILURE);
 		}
 	}
 
-	// --- Подключение к SVM (через интерфейс) ---
+
+	// --- Подключение к SVM ---
     printf("UVM: Подключение к SVM через %s...\n", config.interface_type);
-    comm_handle = io_uvm->connect(io_uvm); // Используем функцию интерфейса
-	if (comm_handle < 0) {
-		fprintf(stderr, "UVM: Ошибка подключения к SVM. Завершение.\n");
-        io_uvm->destroy(io_uvm);
-		exit(EXIT_FAILURE);
-	}
-    // io_uvm->io_handle теперь содержит активный дескриптор
+    uvm_comm_handle = io_uvm->connect(io_uvm);
+	if (uvm_comm_handle < 0) { fprintf(stderr, "UVM: Ошибка подключения к SVM.\n"); goto cleanup; }
+	printf("UVM: Успешно подключено (handle: %d)\n", uvm_comm_handle);
 
-	printf("UVM: Успешно подключено (handle: %d)\n", comm_handle);
+	printf("Выбран режим работы: %s\n",
+           (selectedMode == MODE_OR) ? "OR" :
+           (selectedMode == MODE_OR1) ? "OR1" :
+           (selectedMode == MODE_DR) ? "DR" : "VR");
 
 
-	printf("Выбран режим работы: ");
-	switch (selectedMode) {
-		case MODE_OR:   printf("OR\n"); break;
-		case MODE_OR1:  printf("OR1\n"); break;
-		case MODE_DR:   printf("DR\n"); break;
-		case MODE_VR:   printf("VR\n"); break;
-	}
+	// --- Запуск потоков ---
+    printf("UVM: Запуск потоков Sender и Receiver...\n");
+    uvm_keep_running = true; // Сбрасываем флаг перед запуском
+    if (pthread_create(&sender_tid, NULL, uvm_sender_thread_func, NULL) != 0) { perror("UVM: Failed to create sender thread"); goto cleanup_threads; }
+    if (pthread_create(&receiver_tid, NULL, uvm_receiver_thread_func, NULL) != 0) { perror("UVM: Failed to create receiver thread"); goto cleanup_threads; }
+    printf("UVM: Потоки запущены.\n");
 
-	// --- ВЗАИМОДЕЙСТВИЕ С SVM (через uvm_comm, передавая io_uvm) ---
-    // Переменные для хранения указателей на тела ответов
-	ConfirmInitBody* confirmInitBody = NULL;
-	PodtverzhdenieKontrolyaBody* podtverzhdenieKontrolyaBody = NULL;
-	RezultatyKontrolyaBody* rezultatyKontrolyaBody = NULL;
-	SostoyanieLiniiBody* sostoyanieLiniiBody = NULL;
+
+	// --- ВЗАИМОДЕЙСТВИЕ С SVM ---
+    Message response_msg;
 
 	// --- ПОДГОТОВКА К СЕАНСУ НАБЛЮДЕНИЯ ---
 	printf("\n--- Подготовка к сеансу наблюдения ---\n");
+    bool seq_ok = true; // Флаг успешного выполнения последовательности
 
-    // Инициализация канала
-    // Передаем io_uvm вместо clientSocketFD
-	confirmInitBody = send_init_channel_and_receive_confirm(io_uvm, &currentMessageCounter, &receivedMessage);
-	if (confirmInitBody == NULL) { goto cleanup_and_exit; }
-	printf("Получено подтверждение инициализации от SVM: LAK=0x%02X, SLP=0x%02X, VDR=0x%02X, BOP1=0x%02X, BOP2=0x%02X, BCB=0x%08X\n",
-		   confirmInitBody->lak, confirmInitBody->slp, confirmInitBody->vdr, confirmInitBody->bop1, confirmInitBody->bop2, confirmInitBody->bcb);
-	printf("Счетчик BCB из подтверждения инициализации: 0x%08X\n", confirmInitBody->bcb);
-    sleep(DELAY_BETWEEN_MESSAGES_SEC); // Задержка между шагами
+    seq_ok &= send_uvm_request(UVM_REQ_INIT_CHANNEL, 0);
+    if (seq_ok && !wait_for_response(MESSAGE_TYPE_CONFIRM_INIT, &response_msg, 5)) {
+        fprintf(stderr, "UVM: Не получен ответ на Init Channel.\n"); seq_ok = false;
+    }
+    if (seq_ok) {
+        ConfirmInitBody* confirmInitBody = (ConfirmInitBody*)response_msg.body;
+        printf("Получено подтверждение инициализации: LAK=0x%02X, BCB=0x%08X\n", confirmInitBody->lak, confirmInitBody->bcb);
+        sleep(1);
+    }
 
-    // Провести контроль
-    uint8_t tk_request = 0x01; // Запрашиваем самоконтроль СВ-М + контроль ОЗУ ОР1/ОР/ДР
-    podtverzhdenieKontrolyaBody = send_provesti_kontrol_and_receive_podtverzhdenie(io_uvm, &currentMessageCounter, &receivedMessage, tk_request);
-	if (podtverzhdenieKontrolyaBody == NULL) { goto cleanup_and_exit; }
-    printf("Получено подтверждение контроля от SVM: LAK=0x%02X, TK=0x%02X, BCB=0x%08X\n",
-		   podtverzhdenieKontrolyaBody->lak, podtverzhdenieKontrolyaBody->tk, podtverzhdenieKontrolyaBody->bcb);
-	printf("Счетчик BCB из подтверждения контроля: 0x%08X\n", podtverzhdenieKontrolyaBody->bcb);
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    if (seq_ok) {
+        uint8_t tk_request = 0x01;
+        seq_ok &= send_uvm_request(UVM_REQ_PROVESTI_KONTROL, tk_request);
+        if (seq_ok && !wait_for_response(MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA, &response_msg, 5)) {
+             fprintf(stderr, "UVM: Не получен ответ на Provesti Kontrol.\n"); seq_ok = false;
+        }
+        if (seq_ok) {
+            PodtverzhdenieKontrolyaBody* podtverzhdenieKontrolyaBody = (PodtverzhdenieKontrolyaBody*)response_msg.body;
+            printf("Получено подтверждение контроля: LAK=0x%02X, TK=0x%02X, BCB=0x%08X\n", podtverzhdenieKontrolyaBody->lak, podtverzhdenieKontrolyaBody->tk, podtverzhdenieKontrolyaBody->bcb);
+            sleep(1);
+        }
+    }
 
-    // Выдать результаты контроля
-    uint8_t vpk_request = 0x0F; // Пример: Запросить все результаты ОЗУ (биты 1,2,3) и сам результат контроля (бит 0)
-    rezultatyKontrolyaBody = send_vydat_rezultaty_kontrolya_and_receive_rezultaty(io_uvm, &currentMessageCounter, &receivedMessage, vpk_request);
-	if (rezultatyKontrolyaBody == NULL) { goto cleanup_and_exit; }
-    printf("Получены результаты контроля от SVM: LAK=0x%02X, RSK=0x%02X, VSK=0x%04X, BCB=0x%08X\n",
-		   rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->vsk, rezultatyKontrolyaBody->bcb);
-	printf("Счетчик BCB из результатов контроля: 0x%08X\n", rezultatyKontrolyaBody->bcb);
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+     if (seq_ok) {
+         uint8_t vpk_request = 0x0F;
+         seq_ok &= send_uvm_request(UVM_REQ_VYDAT_REZULTATY, vpk_request);
+         if (seq_ok && !wait_for_response(MESSAGE_TYPE_RESULTATY_KONTROLYA, &response_msg, 5)) {
+             fprintf(stderr, "UVM: Не получен ответ на Vydat Rezultaty.\n"); seq_ok = false;
+         }
+         if (seq_ok) {
+             RezultatyKontrolyaBody* rezultatyKontrolyaBody = (RezultatyKontrolyaBody*)response_msg.body;
+             printf("Получены результаты контроля: LAK=0x%02X, RSK=0x%02X, VSK=0x%04X, BCB=0x%08X\n", rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->vsk, rezultatyKontrolyaBody->bcb);
+             sleep(1);
+         }
+    }
 
-    // Выдать состояние линии
-    sostoyanieLiniiBody = send_vydat_sostoyanie_linii_and_receive_sostoyanie(io_uvm, &currentMessageCounter, &receivedMessage);
-	if (sostoyanieLiniiBody == NULL) { goto cleanup_and_exit; }
-	printf("Получено сообщение состояния линии от SVM: LAK=0x%02X, KLA=0x%04X, SLA=0x%08X, KSA=0x%04X, BCB=0x%08X\n",
-		   sostoyanieLiniiBody->lak, sostoyanieLiniiBody->kla, sostoyanieLiniiBody->sla, sostoyanieLiniiBody->ksa, sostoyanieLiniiBody->bcb);
-	printf("Счетчик BCB из состояния линии: 0x%08X\n", sostoyanieLiniiBody->bcb);
-	printf("Сырые данные тела (первые 10 байт) состояния линии: ");
-	for (int i = 0; i < 10 && i < receivedMessage.header.body_length; ++i) {
-		printf("%02X ", receivedMessage.body[i]);
-	}
-	printf("\n");
-    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+    if (seq_ok) {
+         seq_ok &= send_uvm_request(UVM_REQ_VYDAT_SOSTOYANIE, 0);
+         if (seq_ok && !wait_for_response(MESSAGE_TYPE_SOSTOYANIE_LINII, &response_msg, 5)) {
+             fprintf(stderr, "UVM: Не получен ответ на Vydat Sostoyanie.\n"); seq_ok = false;
+         }
+         if (seq_ok) {
+             SostoyanieLiniiBody* sostoyanieLiniiBody = (SostoyanieLiniiBody*)response_msg.body;
+             printf("Получено состояние линии: LAK=0x%02X, KLA=0x%04X, SLA=0x%08X, KSA=0x%04X, BCB=0x%08X\n",
+                    sostoyanieLiniiBody->lak, sostoyanieLiniiBody->kla, sostoyanieLiniiBody->sla, sostoyanieLiniiBody->ksa, sostoyanieLiniiBody->bcb);
+             sleep(1);
+         }
+    }
+
+    if (!seq_ok) {
+        fprintf(stderr, "UVM: Ошибка на этапе подготовки к наблюдению.\n");
+        goto shutdown_threads;
+    }
+
+    // Ожидаем отправки всех сообщений подготовки к наблюдению
+    pthread_mutex_lock(&uvm_send_counter_mutex);
+    while(uvm_outstanding_sends > 0 && uvm_keep_running) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;
+        pthread_cond_timedwait(&uvm_send_counter_cond, &uvm_send_counter_mutex, &ts);
+    }
+    pthread_mutex_unlock(&uvm_send_counter_mutex);
+    if (!uvm_keep_running) goto shutdown_threads;
 
 
 	// --- ПОДГОТОВКА К СЕАНСУ СЪЁМКИ ---
 	printf("\n--- Подготовка к сеансу съемки - ");
-    int send_status = 0;
+    bool send_ok = true;
 
-    // Передаем io_uvm во все функции отправки
 	if (selectedMode == MODE_DR) {
-		printf("Режим ДР ---\n");
-		send_status |= send_prinyat_parametry_sdr(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_parametry_tsd(io_uvm, &currentMessageCounter);
-		send_status |= send_navigatsionnye_dannye(io_uvm, &currentMessageCounter);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_SDR, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_TSD, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_NAV_DANNYE, 0);
 	} else if (selectedMode == MODE_VR) {
-		printf("Режим ВР ---\n");
-		send_status |= send_prinyat_parametry_so(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_parametry_3tso(io_uvm, &currentMessageCounter);
-		send_status |= send_navigatsionnye_dannye(io_uvm, &currentMessageCounter);
-	} else if (selectedMode == MODE_OR || selectedMode == MODE_OR1) {
-		if (selectedMode == MODE_OR) printf("Режим ОР ---\n"); else printf("Режим ОР1 ---\n");
-		send_status |= send_prinyat_parametry_so(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_time_ref_range(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_reper(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_parametry_3tso(io_uvm, &currentMessageCounter);
-		send_status |= send_prinyat_ref_azimuth(io_uvm, &currentMessageCounter);
-		send_status |= send_navigatsionnye_dannye(io_uvm, &currentMessageCounter);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_SO, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_3TSO, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_NAV_DANNYE, 0);
+	} else { // OR or OR1
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_SO, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_TIME_REF, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_REPER, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_PARAM_3TSO, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_REF_AZIMUTH, 0);
+		send_ok &= send_uvm_request(UVM_REQ_PRIYAT_NAV_DANNYE, 0);
 	}
 
-    if(send_status != 0) {
-        fprintf(stderr, "UVM: Произошла ошибка при отправке сообщений подготовки к съемке.\n");
-        goto cleanup_and_exit;
+    if(!send_ok) {
+        fprintf(stderr, "UVM: Ошибка при добавлении сообщений подготовки к съемке в очередь.\n");
+        goto shutdown_threads;
     }
 
-	printf("\nUVM: Завершение работы после отправки параметров.\n");
+    // --- ОЖИДАНИЕ ОТПРАВКИ ВСЕХ СООБЩЕНИЙ ПОДГОТОВКИ К СЪЕМКЕ ---
+    printf("UVM Main: Ожидание завершения отправки сообщений подготовки к съемке...\n");
+    pthread_mutex_lock(&uvm_send_counter_mutex);
+    while(uvm_outstanding_sends > 0 && uvm_keep_running) {
+        printf("UVM Main: Осталось отправить: %d\n", uvm_outstanding_sends);
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;
+        pthread_cond_timedwait(&uvm_send_counter_cond, &uvm_send_counter_mutex, &ts);
+    }
+    bool all_sent_before_stop = (uvm_outstanding_sends == 0);
+    pthread_mutex_unlock(&uvm_send_counter_mutex);
 
-cleanup_and_exit: // Метка для очистки перед выходом
-    if (io_uvm != NULL) {
-        if (comm_handle >= 0) { // Если соединение было установлено
-            io_uvm->disconnect(io_uvm, comm_handle); // Закрываем через интерфейс
-            printf("UVM: Соединение закрыто (handle: %d).\n", comm_handle);
+    if (!uvm_keep_running) {
+        fprintf(stderr, "UVM: Остановка во время ожидания отправки.\n");
+        goto shutdown_threads;
+    }
+
+    if(all_sent_before_stop) {
+        printf("UVM: Все сообщения подготовки к съемке отправлены.\n");
+        printf("UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...\n");
+        // Здесь UVM может перейти в режим ожидания/обработки СУБК, КО и т.д.
+        // пока просто ждем сигнала завершения
+        while(uvm_keep_running) {
+            // Можно добавить обработку сообщений из uvm_incoming_response_queue, если SVM их шлет
+            // if (queue_dequeue(uvm_incoming_response_queue, &response_msg)) { ... }
+            sleep(1); // Просто ждем
         }
-        io_uvm->destroy(io_uvm); // Освобождаем ресурсы интерфейса
+    } else {
+         fprintf(stderr, "UVM: Не удалось отправить все сообщения подготовки к съемке.\n");
+         exit_code = EXIT_FAILURE; // Устанавливаем код ошибки
+    }
+
+
+shutdown_threads: // Инициируем завершение потоков
+    printf("\nUVM: Инициируем завершение потоков...\n");
+    if (uvm_keep_running) uvm_keep_running = false;
+
+    if (uvm_outgoing_request_queue) {
+        UvmRequest shutdown_req = {.type = UVM_REQ_SHUTDOWN};
+        queue_req_enqueue(uvm_outgoing_request_queue, &shutdown_req);
+        queue_req_shutdown(uvm_outgoing_request_queue);
+    }
+    if (uvm_incoming_response_queue) queue_shutdown(uvm_incoming_response_queue);
+
+    if (uvm_comm_handle >= 0) {
+        shutdown(uvm_comm_handle, SHUT_RDWR);
+    }
+
+cleanup_threads: // Ожидание завершения потоков
+    printf("UVM: Ожидание завершения потоков...\n");
+    if (sender_tid != 0) pthread_join(sender_tid, NULL); // Проверяем перед join
+    printf("UVM: Sender thread joined.\n");
+    if (receiver_tid != 0) pthread_join(receiver_tid, NULL);
+    printf("UVM: Receiver thread joined.\n");
+
+
+cleanup: // Очистка ресурсов
+	printf("UVM: Завершение работы и очистка ресурсов...\n");
+    if (io_uvm != NULL) {
+        if (uvm_comm_handle >= 0) {
+            io_uvm->disconnect(io_uvm, uvm_comm_handle);
+            printf("UVM: Соединение закрыто (handle: %d).\n", uvm_comm_handle);
+        }
+        io_uvm->destroy(io_uvm);
         printf("UVM: Интерфейс IO освобожден.\n");
+    } else if (uvm_comm_handle >= 0) {
+         close(uvm_comm_handle); // Если интерфейс не создан, но хэндл есть
     }
+    if(uvm_outgoing_request_queue) queue_req_destroy(uvm_outgoing_request_queue);
+    if(uvm_incoming_response_queue) queue_destroy(uvm_incoming_response_queue);
+    pthread_mutex_destroy(&uvm_send_counter_mutex);
+    pthread_cond_destroy(&uvm_send_counter_cond);
 
-    // Определяем код возврата
-    int exit_code = EXIT_SUCCESS;
-    if (send_status != 0 || confirmInitBody == NULL || podtverzhdenieKontrolyaBody == NULL || rezultatyKontrolyaBody == NULL || sostoyanieLiniiBody == NULL) {
-        exit_code = EXIT_FAILURE;
-    }
-
+    printf("UVM: Очистка завершена.\n");
 	return exit_code;
 }
