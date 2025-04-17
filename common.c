@@ -1,4 +1,12 @@
-// common.c
+/*
+common.c:
+•	Реализация функций создания сообщений (create_***_message)
+•	Реализация вспомогательных функций:
+	o	Преобразовать сообщение в сетевой порядок байтов (message_to_network_byte_order)
+	o	Преобразовать сообщение в порядок байтов хоста (message_to_host_byte_order)
+	o	Отправить сообщение через сокет (send_message)
+
+*/
 
 #include "common.h"
 #include <string.h>
@@ -501,13 +509,14 @@ void message_to_network_byte_order(Message *message) {
 		body->NTSO4 = htons(ntohs(body->NTSO4));
 		body->ReperR4 = htons(ntohs(body->ReperR4));
 		body->ReperA4 = htons(ntohs(body->ReperA4));
-	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {		// 4.2.12. «Принять параметры СДР»
-		PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
-		body->q = htons(ntohs(body->q));
-		body->sigmaybm = htons(ntohs(body->sigmaybm));
-		body->nfft = htons(ntohs(body->nfft));
-		body->mrr = htons(ntohs(body->mrr));
-		body->fixp = htons(ntohs(body->fixp));
+    } else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {     // 4.2.12. «Принять параметры СДР»
+        PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
+        body->q = htons(ntohs(body->q));
+        body->sigmaybm = htons(ntohs(body->sigmaybm));
+        body->nfft = htons(ntohs(body->nfft));
+        body->mrr = htons(ntohs(body->mrr));
+        body->fixp = htons(ntohs(body->fixp));
+        // Остальные поля uint8_t/bit не требуют преобразования
 	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_3TSO) {	// 4.2.13. «Принять параметры 3ЦО»
 		PrinyatParametry3TsoBody *body = (PrinyatParametry3TsoBody *)message->body;
 		body->Rezerv = htons(ntohs(body->Rezerv));
@@ -521,12 +530,13 @@ void message_to_network_byte_order(Message *message) {
 		for (size_t i = 0; i < REF_AZIMUTH_ELEMENT_COUNT; ++i) {
 			body->ref_azimuth[i] = htons(ntohs(body->ref_azimuth[i]));  // Преобразуем каждый int16_t
 		}
-	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD) {		// 4.2.15. «Принять параметры ЦДР»
-		PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
-		body->nin = htons(ntohs(body->nin));
-		body->nout = htons(ntohs(body->nout));
-		body->mrn = htons(ntohs(body->mrn));
-		body->rezerv = htons(ntohs(body->rezerv));
+    } else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD) {     // 4.2.15. «Принять параметры ЦДР»
+        PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
+        body->nin = htons(ntohs(body->nin));
+        body->nout = htons(ntohs(body->nout));
+        body->mrn = htons(ntohs(body->mrn));
+        body->rezerv = htons(ntohs(body->rezerv));
+        // Остальные поля uint8_t и массивы не требуют преобразования на этом уровне
 	}
 }
 
@@ -580,13 +590,13 @@ void message_to_host_byte_order(Message *message) {
 		body->NTSO4 = ntohs(body->NTSO4);
 		body->ReperR4 = ntohs(body->ReperR4);
 		body->ReperA4 = ntohs(body->ReperA4);
-	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {		// 4.2.12. «Принять параметры СДР»
-		PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
-		body->q = ntohs(body->q);
-		body->sigmaybm = ntohs(body->sigmaybm);
-		body->nfft = ntohs(body->nfft);
-		body->mrr = ntohs(body->mrr);
-		body->fixp = ntohs(body->fixp);
+    } else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR) {     // 4.2.12. «Принять параметры СДР»
+        PrinyatParametrySdrBody *body = (PrinyatParametrySdrBody *)message->body;
+        body->q = ntohs(body->q);
+        body->sigmaybm = ntohs(body->sigmaybm);
+        body->nfft = ntohs(body->nfft);
+        body->mrr = ntohs(body->mrr);
+        body->fixp = ntohs(body->fixp);
 	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_3TSO) {	// 4.2.13. «Принять параметры 3ЦО»
 		PrinyatParametry3TsoBody *body = (PrinyatParametry3TsoBody *)message->body;
 		body->Rezerv = ntohs(body->Rezerv);
@@ -599,12 +609,12 @@ void message_to_host_byte_order(Message *message) {
 		for (size_t i = 0; i < REF_AZIMUTH_ELEMENT_COUNT; ++i) {
 			body->ref_azimuth[i] = ntohs(body->ref_azimuth[i]);  // Преобразуем каждый int16_t
 		}
-	} else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD) {		// 4.2.15. «Принять параметры ЦДР»
-		PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
-		body->nin = ntohs(body->nin);
-		body->nout = ntohs(body->nout);
-		body->mrn = ntohs(body->mrn);
-		body->rezerv = ntohs(body->rezerv);
+    } else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD) {     // 4.2.15. «Принять параметры ЦДР»
+        PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
+        body->nin = ntohs(body->nin);
+        body->nout = ntohs(body->nout);
+        body->mrn = ntohs(body->mrn);
+        body->rezerv = ntohs(body->rezerv);
 	}
 }
 

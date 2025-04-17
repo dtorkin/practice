@@ -1,4 +1,10 @@
-// common.h
+/*
+common.h:
+•	Константы, перечисления (режимы работы РСА, состояние СВ-М, типы сообщений MESSAGE_TYPE_)
+•	Базовые структуры сообщений (MessageHeader, Message, MessageFlags)
+•	Структуры тел сообщений (***Body для каждого типа)
+•	Прототипы функций из common.c 
+*/
 
 #ifndef COMMON_H
 #define COMMON_H
