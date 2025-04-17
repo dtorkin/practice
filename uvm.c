@@ -1,3 +1,5 @@
+// uvm.c
+
 #include "errno.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -186,7 +188,7 @@ void send_prinyat_parametry_sdr(int clientSocketFD, uint16_t *messageCounter) {
     sleep(DELAY_BETWEEN_MESSAGES_SEC);
 }
 
-// --- НОВОЕ: Функция отправки сообщения "Принять параметры ЦДР" (Пункт 3.4.3) ---
+// --- Функция отправки сообщения "Принять параметры ЦДР" (Пункт 3.4.3) ---
 void send_prinyat_parametry_tsd(int clientSocketFD, uint16_t *messageCounter) {
     Message prinyatParametryTsdMessage = create_prinyat_parametry_tsd_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
     if (send_message(clientSocketFD, &prinyatParametryTsdMessage) != 0) {
@@ -201,7 +203,7 @@ void send_prinyat_parametry_tsd(int clientSocketFD, uint16_t *messageCounter) {
     sleep(DELAY_BETWEEN_MESSAGES_SEC);
 }
 
-// --- НОВОЕ: Функция отправки сообщения "Навигационные данные" (Пункт 3.4.3) ---
+// --- Функция отправки сообщения "Навигационные данные" (Пункт 3.4.3) ---
 void send_navigatsionnye_dannye(int clientSocketFD, uint16_t *messageCounter) {
     Message navigatsionnyeDannyeMessage = create_navigatsionnye_dannye_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
     if (send_message(clientSocketFD, &navigatsionnyeDannyeMessage) != 0) {
@@ -217,7 +219,7 @@ void send_navigatsionnye_dannye(int clientSocketFD, uint16_t *messageCounter) {
 }
 
 
-int main() {
+int main(int argc, char* argv[] ) {
     int clientSocketFD;
     struct sockaddr_in serverAddress;
     uint16_t currentMessageCounter = 0;
@@ -246,6 +248,33 @@ int main() {
     }
 
     printf("UVM подключен к SVM\n");
+	
+	// --- Выбор режима работы через аргументы командной строки ---
+    RadarMode selectedMode = MODE_DR; // Режим по умолчанию - ДР
+
+    if (argc > 1) {
+        if (strcmp(argv[1], "OR") == 0) {
+            selectedMode = MODE_OR;
+        } else if (strcmp(argv[1], "OR1") == 0) {
+            selectedMode = MODE_OR1;
+        } else if (strcmp(argv[1], "DR") == 0) {
+            selectedMode = MODE_DR;
+        } else if (strcmp(argv[1], "VR") == 0) {
+            selectedMode = MODE_VR;
+        } else {
+            fprintf(stderr, "Неверный режим работы. Используйте OR, OR1, DR или VR.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    printf("Выбран режим работы: ");
+    switch (selectedMode) {
+        case MODE_OR:   printf("OR\n"); break;
+        case MODE_OR1:  printf("OR1\n"); break;
+        case MODE_DR:   printf("DR\n"); break;
+        case MODE_VR:   printf("VR\n"); break;
+    }
+    // --- Конец выбора режима работы через аргументы командной строки ---
 
     // --- Фаза 1: Инициализация канала --- (Пункт 3.2)
     confirmInitBody = send_init_channel_and_receive_confirm(clientSocketFD, &currentMessageCounter, &receivedMessage);
@@ -299,15 +328,24 @@ int main() {
     }
     printf("\n");
 
-    // --- Фаза 5: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры СДР" (Пункт 3.4.3) ---
-    send_prinyat_parametry_sdr(clientSocketFD, &currentMessageCounter);
-
-    // --- НОВОЕ: Фаза 6: Подготовка к сеансу съемки - Режим ДР - Отправка "Принять параметры ЦДР" (Пункт 3.4.3) ---
-    send_prinyat_parametry_tsd(clientSocketFD, &currentMessageCounter);
-
-    // --- НОВОЕ: Фаза 7: Подготовка к сеансу съемки - Режим ДР - Отправка "Навигационные данные" (Пункт 3.4.3) ---
-    send_navigatsionnye_dannye(clientSocketFD, &currentMessageCounter);
-
+    // --- Фаза 5: Подготовка к сеансу съемки ---
+    if (selectedMode == MODE_DR) {
+        printf("\n--- Фаза 5: Подготовка к сеансу съемки - Режим ДР ---\n");
+        send_prinyat_parametry_sdr(clientSocketFD, &currentMessageCounter);
+        send_prinyat_parametry_tsd(clientSocketFD, &currentMessageCounter);
+        send_navigatsionnye_dannye(clientSocketFD, &currentMessageCounter);
+    } else if (selectedMode == MODE_VR) {
+        printf("\n--- Фаза 5: Подготовка к сеансу съемки - Режим ВР (Заглушка) ---\n");
+		/* Нужно реализовать: 
+		Принять параметры СО (4.2.9)
+		Принять параметры ЗЦО (4.2.13)
+		Навигационные данные (4.2.16)
+		*/
+    } else if (selectedMode == MODE_OR) {
+        printf("\n--- Фаза 5: Подготовка к сеансу съемки - Режим OR (Заглушка) ---\n");
+    } else if (selectedMode == MODE_OR1) {
+        printf("\n--- Фаза 5: Подготовка к сеансу съемки - Режим OR1 (Заглушка) ---\n");
+    }
 
     close(clientSocketFD);
     return 0;

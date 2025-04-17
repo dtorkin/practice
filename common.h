@@ -1,3 +1,5 @@
+// common.h
+
 #ifndef COMMON_H
 #define COMMON_H
 
@@ -15,6 +17,14 @@ typedef enum {
     LOGICAL_ADDRESS_UVM_VAL = LOGICAL_ADDRESS_UVM,
     LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1,
 } LogicalAddress;
+
+// Перечисление: Режимы работы РСА
+typedef enum {
+    MODE_OR,   // Режим OP
+    MODE_OR1,  // Режим OP1
+    MODE_DR,   // Режим ДР
+    MODE_VR    // Режим ВР
+} RadarMode;
 
 // Перечисление: Типы сообщений (из таблицы 4.4)
 typedef enum {
@@ -118,7 +128,7 @@ typedef struct {
     uint32_t bcb;         // Состояние ВСВ (BCB) - Заглушка для 4.2.8
 } SostoyanieLinii138Body;
 
-// --- НОВОЕ: Тело сообщения "Принять параметры СДР" (Пункт 4.2.12) ---
+// --- Тело сообщения "Принять параметры СДР" (Пункт 4.2.12) ---
 typedef struct {
     uint8_t pp_nl;    // Режим работы РСА и номер луча (РР и НЛ)
     uint8_t brl;      // Маска бланкирования рабочих лучей (БРЛ)
@@ -142,7 +152,7 @@ typedef struct {
     uint16_t fixp;    // Уровень фиксированного порога (FixP)
 } PrinyatParametrySdrBody;
 
-// --- НОВОЕ: Тело сообщения "Принять параметры ЦДР" (Пункт 4.2.15) ---
+// --- Тело сообщения "Принять параметры ЦДР" (Пункт 4.2.15) ---
 typedef struct {
     uint16_t rezerv;     // Резерв
     uint16_t nin;       // Количество строк дальности (Nin)
@@ -155,7 +165,7 @@ typedef struct {
     uint8_t har[54400];  // Матрица опор по азимуту HAR[NAR, Nin], assumed max NAR*Nin = 54400 for now, using uint8_t as placeholder, will need complex fixed16 later
 } PrinyatParametryTsdBody;
 
-// --- НОВОЕ: Тело сообщения "Навигационные данные" (Пункт 4.2.16) ---
+// --- Тело сообщения "Навигационные данные" (Пункт 4.2.16) ---
 typedef struct {
     uint8_t mnd[256]; // Массив навигационных данных (МНД)
 } NavigatsionnyeDannyeBody;
@@ -179,7 +189,7 @@ Message create_sostoyanie_linii_message(LogicalAddress svm_address, uint16_t kla
 Message create_sostoyanie_linii_136_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
 Message create_vydat_sostoyanie_linii_137_message(LogicalAddress svm_address, uint16_t message_num);
 Message create_sostoyanie_linii_138_message(LogicalAddress svm_address, uint32_t bcb, uint16_t message_num);
-// --- НОВОЕ: Прототипы функций создания сообщений "Принять параметры СДР", "Принять параметры ЦДР", "Навигационные данные" ---
+// --- Прототипы функций создания сообщений "Принять параметры СДР", "Принять параметры ЦДР", "Навигационные данные" ---
 Message create_prinyat_parametry_sdr_message(LogicalAddress svm_address, uint16_t message_num);
 Message create_prinyat_parametry_tsd_message(LogicalAddress svm_address, uint16_t message_num);
 Message create_navigatsionnye_dannye_message(LogicalAddress svm_address, uint16_t message_num);

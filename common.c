@@ -1,3 +1,5 @@
+// common.c
+
 #include "common.h"
 #include <string.h>
 #include <arpa/inet.h>
@@ -283,7 +285,7 @@ Message create_prinyat_parametry_sdr_message(LogicalAddress svm_address, uint16_
     return message;
 }
 
-// --- НОВОЕ: Функция создания сообщения "Принять параметры ЦДР" (Пункт 4.2.15) ---
+// --- Функция создания сообщения "Принять параметры ЦДР" (Пункт 4.2.15) ---
 Message create_prinyat_parametry_tsd_message(LogicalAddress svm_address, uint16_t message_num) {
     Message message;
     memset(&message, 0, sizeof(Message));
@@ -313,7 +315,7 @@ Message create_prinyat_parametry_tsd_message(LogicalAddress svm_address, uint16_
     return message;
 }
 
-// --- НОВОЕ: Функция создания сообщения "Навигационные данные" (Пункт 4.2.16) ---
+// --- Функция создания сообщения "Навигационные данные" (Пункт 4.2.16) ---
 Message create_navigatsionnye_dannye_message(LogicalAddress svm_address, uint16_t message_num) {
     Message message;
     memset(&message, 0, sizeof(Message));
@@ -354,7 +356,7 @@ void message_to_network_byte_order(Message *message) {
         body->nfft = htons(body->nfft);
         body->mrr = htons(body->mrr);
         body->fixp = htons(body->fixp);
-    }  // --- НОВОЕ: Добавление обработки для "Принять параметры ЦДР" ---
+    }  // --- Добавление обработки для "Принять параметры ЦДР" ---
     else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSDR) {
         PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
         body->nin = htons(body->nin);
@@ -396,7 +398,7 @@ void message_to_host_byte_order(Message *message) {
         body->nfft = ntohs(body->nfft);
         body->mrr = ntohs(body->mrr);
         body->fixp = ntohs(body->fixp);
-    } // --- НОВОЕ: Добавление обработки для "Принять параметры ЦДР" ---
+    } // --- Добавление обработки для "Принять параметры ЦДР" ---
      else if (message->header.message_type == MESSAGE_TYPE_PRIYAT_PARAMETRY_TSDR) {
         PrinyatParametryTsdBody *body = (PrinyatParametryTsdBody *)message->body;
         body->nin = ntohs(body->nin);
