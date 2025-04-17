@@ -1,0 +1,260 @@
+// uvm.c
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include "common.h"
+
+// Константы
+#define SVM_IP_ADDRESS "127.0.0.1" // Изменено на localhost для теста
+#define PORT_UVM 8080
+#define DELAY_BETWEEN_MESSAGES_SEC 2
+
+// Функция: Отправка сообщения "Инициализация канала" и прием подтверждения (Пункт 3.2, 3.3.3)
+ConfirmInitBody* send_init_channel_and_receive_confirm(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+    Message initChannelMessage = create_init_channel_message(LOGICAL_ADDRESS_UVM, LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
+    if (send_message(clientSocketFD, &initChannelMessage) != 0) {
+        perror("Ошибка отправки сообщения инициализации канала");
+        return NULL;
+    }
+    printf("Отправлено сообщение инициализации канала\n"); // Пункт 3.2, 3.3.3
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    memset(receivedMessage, 0, sizeof(Message));
+    ssize_t bytesReceived;
+    do {
+        bytesReceived = recv(clientSocketFD, receivedMessage, sizeof(Message), 0);
+    } while (bytesReceived < 0 && errno == EINTR);
+
+    if (bytesReceived < 0) {
+        perror("Ошибка получения подтверждения инициализации");
+        return NULL;
+    } else if (bytesReceived == 0) {
+        printf("Соединение закрыто SVM.\n");
+        close(clientSocketFD);
+        exit(EXIT_SUCCESS);
+    } else if ((size_t)bytesReceived < sizeof(MessageHeader)) {
+        printf("Получен неполный заголовок сообщения.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    message_to_host_byte_order(receivedMessage);
+
+    if (receivedMessage->header.message_type != MESSAGE_TYPE_CONFIRM_INIT) {
+        printf("Полученное сообщение не является подтверждением инициализации. Тип: %u\n", receivedMessage->header.message_type);
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    printf("Получено сообщение подтверждения инициализации\n"); // Пункт 3.2, 3.3.3
+    return (ConfirmInitBody *)receivedMessage->body;
+}
+
+// Функция: Отправка "Провести контроль" и прием "Подтверждение контроля" (Пункт 3.3.5)
+PodtverzhdenieKontrolyaBody* send_provesti_kontrol_and_receive_podtverzhdenie(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+    Message provestiKontrolMessage = create_provesti_kontrol_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, 0x00, (*messageCounter)++);
+    if (send_message(clientSocketFD, &provestiKontrolMessage) != 0) {
+        perror("Ошибка отправки сообщения провести контроль");
+        return NULL;
+    }
+    printf("Отправлено сообщение провести контроль\n"); // Пункт 3.3.5
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    memset(receivedMessage, 0, sizeof(Message));
+    ssize_t bytesReceived;
+    do {
+        bytesReceived = recv(clientSocketFD, receivedMessage, sizeof(Message), 0);
+    } while (bytesReceived < 0 && errno == EINTR);
+
+    if (bytesReceived < 0) {
+        perror("Ошибка получения подтверждения контроля");
+        return NULL;
+    } else if (bytesReceived == 0) {
+        printf("Соединение закрыто SVM.\n");
+        close(clientSocketFD);
+        exit(EXIT_SUCCESS);
+    } else if ((size_t)bytesReceived < sizeof(MessageHeader)) {
+        printf("Получен неполный заголовок сообщения.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    message_to_host_byte_order(receivedMessage);
+
+    if (receivedMessage->header.message_type != MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
+        printf("Полученное сообщение не является подтверждением контроля. Тип: %u\n", receivedMessage->header.message_type);
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Получено сообщение подтверждения контроля\n"); // Пункт 3.3.5
+    return (PodtverzhdenieKontrolyaBody *)receivedMessage->body;
+}
+
+// Функция: Отправка "Выдать результаты контроля" и прием "Результаты контроля" (Пункт 3.3.6)
+RezultatyKontrolyaBody* send_vydat_rezultaty_kontrolya_and_receive_rezultaty(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+    Message vydatRezultatyKontrolyaMessage = create_vydat_rezultaty_kontrolya_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, 0x00, (*messageCounter)++);
+    if (send_message(clientSocketFD, &vydatRezultatyKontrolyaMessage) != 0) {
+        perror("Ошибка отправки сообщения выдать результаты");
+        return NULL;
+    }
+    printf("Отправлено сообщение выдать результаты контроля\n"); // Пункт 3.3.6
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    memset(receivedMessage, 0, sizeof(Message));
+    ssize_t bytesReceived;
+    do {
+        bytesReceived = recv(clientSocketFD, receivedMessage, sizeof(Message), 0);
+    } while (bytesReceived < 0 && errno == EINTR);
+
+    if (bytesReceived < 0) {
+        perror("Ошибка получения результатов контроля");
+        return NULL;
+    } else if (bytesReceived == 0) {
+        printf("Соединение закрыто SVM.\n");
+        close(clientSocketFD);
+        exit(EXIT_SUCCESS);
+    } else if ((size_t)bytesReceived < sizeof(MessageHeader)) {
+        printf("Получен неполный заголовок сообщения.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    message_to_host_byte_order(receivedMessage);
+
+    if (receivedMessage->header.message_type != MESSAGE_TYPE_RESULTATY_KONTROLYA) {
+        printf("Полученное сообщение не является результатами контроля. Тип: %u\n", receivedMessage->header.message_type);
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Получено сообщение с результатами контроля\n"); // Пункт 3.3.6
+    return (RezultatyKontrolyaBody *)receivedMessage->body;
+}
+
+// Функция: Отправка "Выдать состояние линии" и прием "Состояние линии" (Пункт 3.3.8)
+SostoyanieLiniiBody* send_vydat_sostoyanie_linii_and_receive_sostoyanie(int clientSocketFD, uint16_t *messageCounter, Message *receivedMessage) {
+    Message vydatSostoyanieLiniiMessage = create_vydat_sostoyanie_linii_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1, (*messageCounter)++);
+    if (send_message(clientSocketFD, &vydatSostoyanieLiniiMessage) != 0) {
+        perror("Ошибка отправки сообщения выдать состояние");
+        return NULL;
+    }
+    printf("Отправлено сообщение выдать состояние линии\n"); // Пункт 3.3.8
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    memset(receivedMessage, 0, sizeof(Message));
+    ssize_t bytesReceived;
+    do {
+        bytesReceived = recv(clientSocketFD, receivedMessage, sizeof(Message), 0);
+    } while (bytesReceived < 0 && errno == EINTR);
+
+    if (bytesReceived < 0) {
+        perror("Ошибка получения состояния линии");
+        return NULL;
+    } else if (bytesReceived == 0) {
+        printf("Соединение закрыто SVM.\n");
+        close(clientSocketFD);
+        exit(EXIT_SUCCESS);
+    } else if ((size_t)bytesReceived < sizeof(MessageHeader)) {
+        printf("Получен неполный заголовок сообщения.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    message_to_host_byte_order(receivedMessage);
+
+    if (receivedMessage->header.message_type != MESSAGE_TYPE_SOSTOYANIE_LINII) {
+        printf("Полученное сообщение не является состоянием линии. Тип: %u\n", receivedMessage->header.message_type);
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Получено сообщение состояния линии\n"); // Пункт 3.3.8
+    return (SostoyanieLiniiBody *)receivedMessage->body;
+}
+
+int main() {
+    int clientSocketFD;
+    struct sockaddr_in serverAddress;
+    uint16_t currentMessageCounter = 0;
+    ConfirmInitBody *confirmInitBody;
+    PodtverzhdenieKontrolyaBody *podtverzhdenieKontrolyaBody;
+    RezultatyKontrolyaBody *rezultatyKontrolyaBody;
+    SostoyanieLiniiBody *sostoyanieLiniiBody;
+    Message receivedMessage;
+
+    if ((clientSocketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Не удалось создать сокет");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&serverAddress, 0, sizeof(serverAddress));
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(PORT_UVM);
+    if (inet_pton(AF_INET, SVM_IP_ADDRESS, &serverAddress.sin_addr) <= 0) {
+        perror("Ошибка преобразования адреса");
+        exit(EXIT_FAILURE);
+    }
+
+    if (connect(clientSocketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
+        perror("Ошибка подключения");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("UVM подключен к SVM\n");
+
+    // --- Фаза 1: Инициализация канала --- (Пункт 3.2)
+    confirmInitBody = send_init_channel_and_receive_confirm(clientSocketFD, &currentMessageCounter, &receivedMessage);
+    if (confirmInitBody == NULL) {
+        fprintf(stderr, "Не удалось инициализировать канал.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    printf("Получено сообщение подтверждения инициализации от SVM: LAK=0x%02X, SLP=0x%02X, VDR=0x%02X, VOR1=0x%02X, VOR2=0x%02X, BCB=0x%08X\n", // Пункт 4.2.2
+           confirmInitBody->lak, confirmInitBody->slp, confirmInitBody->vdr, confirmInitBody->vor1, confirmInitBody->vor2, confirmInitBody->bcb);
+    printf("Счетчик BCB из подтверждения инициализации: 0x%08X\n", confirmInitBody->bcb); // Пункт 4.2.2
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    // --- Фаза 2: Провести контроль --- (Пункт 3.3.5)
+    podtverzhdenieKontrolyaBody = send_provesti_kontrol_and_receive_podtverzhdenie(clientSocketFD, &currentMessageCounter, &receivedMessage);
+    if (podtverzhdenieKontrolyaBody == NULL) {
+        fprintf(stderr, "Не удалось провести контроль.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    printf("Получено сообщение подтверждения контроля от SVM: LAK=0x%02X, TK=0x%02X, BCB=0x%08X\n", // Пункт 4.2.4
+           podtverzhdenieKontrolyaBody->lak, podtverzhdenieKontrolyaBody->tk, podtverzhdenieKontrolyaBody->bcb);
+    printf("Счетчик BCB из подтверждения контроля: 0x%08X\n", podtverzhdenieKontrolyaBody->bcb); // Пункт 4.2.4
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    // --- Фаза 3: Выдать результаты контроля --- (Пункт 3.3.6)
+    rezultatyKontrolyaBody = send_vydat_rezultaty_kontrolya_and_receive_rezultaty(clientSocketFD, &currentMessageCounter, &receivedMessage);
+    if (rezultatyKontrolyaBody == NULL) {
+        fprintf(stderr, "Не удалось выдать результаты контроля.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    printf("Получены результаты контроля от SVM: LAK=0x%02X, RSK=0x%02X, BCK=0x%04X, BCB=0x%08X\n", // Пункт 4.2.6
+           rezultatyKontrolyaBody->lak, rezultatyKontrolyaBody->rsk, rezultatyKontrolyaBody->bck, rezultatyKontrolyaBody->bcb);
+    printf("Счетчик BCB из результатов контроля: 0x%08X\n", rezultatyKontrolyaBody->bcb); // Пункт 4.2.6
+    sleep(DELAY_BETWEEN_MESSAGES_SEC);
+
+    // --- Фаза 4: Выдать состояние линии --- (Пункт 3.3.8)
+    sostoyanieLiniiBody = send_vydat_sostoyanie_linii_and_receive_sostoyanie(clientSocketFD, &currentMessageCounter, &receivedMessage);
+    if (sostoyanieLiniiBody == NULL) {
+        fprintf(stderr, "Не удалось выдать состояние линии.\n");
+        close(clientSocketFD);
+        exit(EXIT_FAILURE);
+    }
+    printf("Получено состояние линии от SVM: LAK=0x%02X, KLA=0x%04X, SLA=0x%08X, KSA=0x%04X, BCB=0x%08X\n", // Пункт 4.2.8
+           sostoyanieLiniiBody->lak, sostoyanieLiniiBody->kla, sostoyanieLiniiBody->sla, sostoyanieLiniiBody->ksa, sostoyanieLiniiBody->bcb);
+    printf("Счетчик BCB из состояния линии: 0x%08X\n", sostoyanieLiniiBody->bcb); // Пункт 4.2.8
+    printf("Сырые данные тела (первые 10 байт) состояния линии: "); // Пункт 4.2.8
+    for (int i = 0; i < 10 && i < ntohs(receivedMessage.header.body_length); ++i) {
+        printf("%02X ", receivedMessage.body[i]);
+    }
+    printf("\n");
+
+    close(clientSocketFD);
+    return 0;
+}
