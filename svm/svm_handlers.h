@@ -10,36 +10,33 @@
 #define SVM_HANDLERS_H
 
 #include "../protocol/protocol_defs.h"
-#include "../io/io_interface.h" // <-- Включаем для IOInterface
+#include "../io/io_interface.h"
 
 // --- Тип указателя на функцию-обработчик ---
-typedef void (*MessageHandler)(IOInterface *io, int clientSocketFD, Message *message); // <-- Добавлен IOInterface *io
+// Теперь возвращает указатель на Message (ответ) или NULL
+typedef Message* (*MessageHandler)(IOInterface *io, int clientSocketFD, Message *message); // <-- Возвращает Message*
 
 // --- Глобальный массив указателей (объявляем как extern) ---
 extern MessageHandler message_handlers[256];
 
-// --- Прототипы функций-обработчиков (добавлен IOInterface *io) ---
-void handle_init_channel_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_confirm_init_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_provesti_kontrol_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_podtverzhdenie_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_vydat_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_vydat_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_parametry_so_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_time_ref_range_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_reper_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_parametry_sdr_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_parametry_3tso_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_ref_azimuth_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_prinyat_parametry_tsd_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-void handle_navigatsionnye_dannye_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-// Добавьте сюда прототипы для остальных сообщений от СВМ к УВМ, если они понадобятся
-// void handle_subk_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-// ...
-// void handle_preduprezhdenie_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
-
+// --- Прототипы функций-обработчиков (теперь возвращают Message*) ---
+Message* handle_init_channel_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_confirm_init_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_provesti_kontrol_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_podtverzhdenie_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_vydat_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_vydat_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_parametry_so_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_time_ref_range_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_reper_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_parametry_sdr_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_parametry_3tso_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_ref_azimuth_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_prinyat_parametry_tsd_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+Message* handle_navigatsionnye_dannye_message(IOInterface *io, int clientSocketFD, Message *receivedMessage);
+// ... Добавить прототипы для остальных обработчиков, если они будут возвращать ответы ...
 
 // --- Функция инициализации диспетчера ---
 void init_message_handlers(void);
