@@ -17,7 +17,7 @@
 #define LINK_CHANGE_PROBABILITY 2          // Вероятность изменения LinkUp (1/X)
 #define LINK_LOW_PROBABILITY 10            // Вероятность увеличения времени низкого уровня (1/Y)
 #define SIGN_DET_CHANGE_PROBABILITY 3      // Вероятность изменения SignDet (1/Z)
-
+#define COUNTER_PRINT_INTERVAL_SEC 5
 
 // --- Внешние переменные счетчиков (объявляем как extern) ---
 extern volatile uint32_t bcbCounter;

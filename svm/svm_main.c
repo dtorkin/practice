@@ -9,9 +9,11 @@
 #include "../protocol/protocol_defs.h" // Определения протокола
 #include "../protocol/message_utils.h" // Утилиты
 #include "../io/io_common.h"          // Функции send/receive
+#include "../config/config.h" // <-- Добавить
 #include "svm_handlers.h"            // Обработчики и диспетчер
 #include "svm_timers.h"              // Таймеры и счетчики
 
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,36 +25,42 @@
 #include <errno.h>
 #include <sys/time.h>
 
-// Константы (можно вынести в config)
-#define PORT_SVM 8080
-#define COUNTER_PRINT_INTERVAL_SEC 5
-
 int main() {
 	int serverSocketFD, clientSocketFD;
 	struct sockaddr_in serverAddress, clientAddress;
 	socklen_t clientAddressLength;
+    AppConfig config; // <-- Добавить структуру конфигурации
 
 	// --- Инициализация ---
 	printf("SVM запуск...\n");
+    // Загрузка конфигурации
+    printf("SVM: Загрузка конфигурации...\n");
+    if (load_config("config.ini", &config) != 0) {
+        fprintf(stderr, "SVM: Не удалось загрузить или обработать config.ini. Завершение.\n");
+        exit(EXIT_FAILURE);
+    }
+    // Проверка типа интерфейса (пока только Ethernet)
+    if (strcasecmp(config.interface_type, "ethernet") != 0) {
+        fprintf(stderr, "SVM: В данный момент поддерживается только 'ethernet' interface_type в config.ini.\n");
+        exit(EXIT_FAILURE);
+    }
+
 	init_message_handlers(); // Инициализация диспетчера сообщений
 
-	// --- Сетевая часть ---
+	// --- Сетевая часть (используем значения из config) ---
 	if ((serverSocketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("Не удалось создать сокет");
 		exit(EXIT_FAILURE);
 	}
-    // Установка опции для переиспользования адреса
     int opt = 1;
     if (setsockopt(serverSocketFD, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("setsockopt(SO_REUSEADDR) failed");
-        // Не фатально, можно продолжить, но могут быть проблемы с быстрым перезапуском
     }
-
 
 	memset(&serverAddress, 0, sizeof(serverAddress));
 	serverAddress.sin_family = AF_INET;
-	serverAddress.sin_addr.s_addr = INADDR_ANY;
-	serverAddress.sin_port = htons(PORT_SVM);
+	serverAddress.sin_addr.s_addr = INADDR_ANY; // Слушаем на всех интерфейсах
+	serverAddress.sin_port = htons(config.ethernet.port); // <-- Используем порт из конфига
 
 	if (bind(serverSocketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
 		perror("Ошибка привязки");
@@ -60,13 +68,13 @@ int main() {
 		exit(EXIT_FAILURE);
 	}
 
-	if (listen(serverSocketFD, 1) < 0) { // Достаточно 1 ожидающего соединения
+	if (listen(serverSocketFD, 1) < 0) {
 		perror("Ошибка прослушивания");
         close(serverSocketFD);
 		exit(EXIT_FAILURE);
 	}
 
-	printf("SVM слушает на порту %d\n", PORT_SVM);
+	printf("SVM слушает на порту %d\n", config.ethernet.port); // <-- Используем порт из конфига
 
 	clientAddressLength = sizeof(clientAddress);
 	if ((clientSocketFD = accept(serverSocketFD, (struct sockaddr *)&clientAddress, &clientAddressLength)) < 0) {
@@ -74,20 +82,22 @@ int main() {
         close(serverSocketFD);
 		exit(EXIT_FAILURE);
 	}
-	close(serverSocketFD); // Закрываем слушающий сокет, он больше не нужен
+	close(serverSocketFD);
 
-	printf("SVM принял соединение от UVM (клиентский дескриптор: %d)\n", clientSocketFD);
-
+	char client_ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &clientAddress.sin_addr, client_ip_str, INET_ADDRSTRLEN);
+    printf("SVM принял соединение от UVM (%s:%d) (клиентский дескриптор: %d)\n",
+           client_ip_str, ntohs(clientAddress.sin_port), clientSocketFD);
 
 	// --- Запуск таймеров ---
-	if (start_timer(TIMER_INTERVAL_BCB_MS, bcbTimerHandler, SIGALRM) == -1) {
+	if (start_timer(TIMER_INTERVAL_BCB_MS, bcbTimerHandler, SIGALRM) == -1) { // TIMER_INTERVAL_BCB_MS теперь из svm_timers.h
 		fprintf(stderr, "Не удалось запустить таймер.\n");
         close(clientSocketFD);
 		exit(EXIT_FAILURE);
 	}
 	printf("Таймер запущен.\n");
 
-	time_t lastPrintTime = time(NULL); // Для периодического вывода счетчиков
+	time_t lastPrintTime = time(NULL);
 
 	// --- Главный цикл обработки сообщений ---
 	while (1) {

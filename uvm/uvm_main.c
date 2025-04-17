@@ -14,20 +14,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <errno.h>
-
-// Константы (можно вынести в config)
-#define SVM_IP_ADDRESS "127.0.0.1" // Используем localhost для тестов
-#define PORT_UVM 8080 // Порт SVM, к которому подключаемся
+#include "../config/config.h"
 
 int main(int argc, char* argv[] ) {
 	int clientSocketFD;
 	struct sockaddr_in serverAddress;
 	uint16_t currentMessageCounter = 0;
-	Message receivedMessage; // Буфер для приема ответов
+	Message receivedMessage;
+    AppConfig config; // <-- Добавить структуру конфигурации
+
+    // --- Загрузка конфигурации ---
+    printf("UVM: Загрузка конфигурации...\n");
+    if (load_config("config.ini", &config) != 0) {
+        fprintf(stderr, "UVM: Не удалось загрузить или обработать config.ini. Завершение.\n");
+        exit(EXIT_FAILURE);
+    }
+     // Проверка типа интерфейса (пока только Ethernet)
+    if (strcasecmp(config.interface_type, "ethernet") != 0) { // <-- Заменить stricmp
+         fprintf(stderr, "UVM: В данный момент поддерживается только 'ethernet' interface_type в config.ini.\n");
+         exit(EXIT_FAILURE);
+    }
 
 	// --- Выбор режима работы ---
 	RadarMode selectedMode = MODE_DR; // Режим по умолчанию - ДР
@@ -42,7 +53,7 @@ int main(int argc, char* argv[] ) {
 		}
 	}
 
-	// --- Сетевая часть ---
+	// --- Сетевая часть (используем значения из config) ---
 	if ((clientSocketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("Не удалось создать сокет");
 		exit(EXIT_FAILURE);
@@ -50,9 +61,10 @@ int main(int argc, char* argv[] ) {
 
 	memset(&serverAddress, 0, sizeof(serverAddress));
 	serverAddress.sin_family = AF_INET;
-	serverAddress.sin_port = htons(PORT_UVM);
-	if (inet_pton(AF_INET, SVM_IP_ADDRESS, &serverAddress.sin_addr) <= 0) {
-		perror("Ошибка преобразования адреса");
+	serverAddress.sin_port = htons(config.ethernet.port); // <-- Используем порт из конфига
+	// Используем IP из конфига
+    if (inet_pton(AF_INET, config.ethernet.target_ip, &serverAddress.sin_addr) <= 0) {
+		perror("Ошибка преобразования адреса SVM из config.ini");
         close(clientSocketFD);
 		exit(EXIT_FAILURE);
 	}
@@ -62,7 +74,7 @@ int main(int argc, char* argv[] ) {
         close(clientSocketFD);
 		exit(EXIT_FAILURE);
 	}
-	printf("UVM подключен к SVM\n");
+	printf("UVM подключен к SVM (%s:%d)\n", config.ethernet.target_ip, config.ethernet.port); // Выводим, куда подключились
 
 	printf("Выбран режим работы: ");
 	switch (selectedMode) {
