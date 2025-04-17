@@ -20,7 +20,7 @@ svm.c:
 #include <signal.h>
 #include <errno.h>
 #include <sys/time.h>
-#include "common.h" // Временно для send_message
+#include "io/io_common.h" // <-- Добавлено
 #include "protocol/protocol_defs.h"
 #include "protocol/message_builder.h" // Нужен для создания сообщений
 #include "protocol/message_utils.h" // Нужен для get_full_message_number, message_to_host/network_byte_order
@@ -378,86 +378,36 @@ int main() {
 	// Message receivedMessage; // Убрали отсюда, создаем в цикле
 
 	while (1) {
-		Message receivedMessage;
-		MessageHeader header; // Буфер только для заголовка
-		ssize_t bytesRead;
-		size_t totalBytesRead;
+		Message receivedMessage; // Создаем здесь
+		int client_handle_to_use = clientSocketFD; // В простой модели пока один клиент
 
-		// --- Этап 1: Чтение заголовка ---
-		totalBytesRead = 0;
-		while (totalBytesRead < sizeof(MessageHeader)) {
-			do {
-				bytesRead = recv(clientSocketFD, ((char*)&header) + totalBytesRead, sizeof(MessageHeader) - totalBytesRead, 0);
-			} while (bytesRead < 0 && errno == EINTR);
+		int recvStatus = receive_full_message(client_handle_to_use, &receivedMessage);
 
-			if (bytesRead < 0) {
-				perror("Ошибка получения заголовка");
-				exit(EXIT_FAILURE);
-			} else if (bytesRead == 0) {
-				printf("Соединение закрыто UVM.\n");
-				close(clientSocketFD);
-				close(serverSocketFD);
-				exit(EXIT_SUCCESS);
-			}
-			totalBytesRead += bytesRead;
+		if (recvStatus == -1) {
+			fprintf(stderr, "SVM: Ошибка получения сообщения. Завершение.\n");
+			break; // Выход из цикла при ошибке
+		} else if (recvStatus == 1) {
+			printf("SVM: Соединение с UVM закрыто.\n");
+			break; // Выход из цикла при закрытии соединения
 		}
 
-		// Копируем прочитанный заголовок в основную структуру
-		memcpy(&receivedMessage.header, &header, sizeof(MessageHeader));
-
-		// --- Этап 2: Преобразование длины тела и чтение тела ---
-		// Сначала преобразуем длину тела в host order
-		uint16_t bodyLen = ntohs(receivedMessage.header.body_length);
-
-		if (bodyLen > MAX_MESSAGE_BODY_SIZE) {
-			 printf("Ошибка: Длина тела (%u) превышает максимальный размер (%d).\n", bodyLen, MAX_MESSAGE_BODY_SIZE);
-			 // Можно добавить обработку ошибки, например, пропуск сообщения или разрыв соединения
-			 continue; // Пропустить это сообщение
-		}
-
-		// Читаем тело сообщения нужной длины
-		totalBytesRead = 0;
-		while (totalBytesRead < bodyLen) {
-			do {
-				bytesRead = recv(clientSocketFD, receivedMessage.body + totalBytesRead, bodyLen - totalBytesRead, 0);
-			} while (bytesRead < 0 && errno == EINTR);
-
-			if (bytesRead < 0) {
-				perror("Ошибка получения тела сообщения");
-				// Можно решить разорвать соединение или пропустить сообщение
-				exit(EXIT_FAILURE); // Пример: завершение при ошибке чтения тела
-			} else if (bytesRead == 0) {
-				printf("Соединение закрыто UVM во время чтения тела.\n");
-				close(clientSocketFD);
-				close(serverSocketFD);
-				exit(EXIT_SUCCESS);
-			}
-			totalBytesRead += bytesRead;
-		}
-
-		// --- Этап 3: Полная обработка сообщения ---
-		// Теперь у нас есть полный заголовок и тело. Выполняем преобразование для остальных полей.
-		// Восстанавливаем body_length в host order для остальной логики (т.к. message_to_host_byte_order ожидает network order)
-		receivedMessage.header.body_length = htons(bodyLen); // Временно возвращаем в network order для функции
-		message_to_host_byte_order(&receivedMessage); // Теперь преобразуем остальные поля
-
+		// Сообщение успешно получено и преобразовано в хост-порядок
 		// Вызываем обработчик
 		MessageHandler handler = message_handlers[receivedMessage.header.message_type];
 		if (handler != NULL) {
-			handler(clientSocketFD, &receivedMessage);
+			// Передаем дескриптор клиента и полученное сообщение
+			handler(client_handle_to_use, &receivedMessage);
 		} else {
 			printf("SVM: Неизвестный тип сообщения: %u\n", receivedMessage.header.message_type);
 		}
 
-		// Переодический вызов счётчиков (зависит от COUNTER_PRINT_INTERVAL_SEC)
+		// Периодический вывод счетчиков (остается как есть)
 		time_t currentTime = time(NULL);
-		// Проверяем, что тип не Vydat Sostoyanie Linii, чтобы избежать двойного вывода
 		if (currentTime - lastPrintTime >= COUNTER_PRINT_INTERVAL_SEC &&
 			receivedMessage.header.message_type != MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
 			print_counters();
 			lastPrintTime = currentTime;
 		}
-		// Убрал sleep(1) отсюда, так как recv теперь блокирующий и ждет данных
 	}
 
 	close(clientSocketFD);

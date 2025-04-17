@@ -16,7 +16,7 @@ uvm.c:
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include "common.h" // Временно для send_message
+#include "io/io_common.h"
 #include "protocol/protocol_defs.h"
 #include "protocol/message_builder.h" // Нужен для создания сообщений
 #include "protocol/message_utils.h" // Нужен для get_full_message_number, message_to_host/network_byte_order
@@ -30,67 +30,6 @@ uvm.c:
 // --- Вспомогательная функция для чтения сообщения ---
 // Читает сообщение из сокета, сначала заголовок, потом тело.
 // Возвращает 0 при успехе, -1 при ошибке, 1 при закрытии сокета.
-int receive_full_message(int socketFD, Message *message) {
-    MessageHeader header;
-    ssize_t bytesRead;
-    size_t totalBytesRead;
-
-    // --- Этап 1: Чтение заголовка ---
-    totalBytesRead = 0;
-    while (totalBytesRead < sizeof(MessageHeader)) {
-        do {
-            bytesRead = recv(socketFD, ((char*)&header) + totalBytesRead, sizeof(MessageHeader) - totalBytesRead, 0);
-        } while (bytesRead < 0 && errno == EINTR); // Повторить при прерывании сигналом
-
-        if (bytesRead < 0) {
-            perror("Ошибка получения заголовка");
-            return -1; // Ошибка
-        } else if (bytesRead == 0) {
-            printf("Соединение закрыто удаленной стороной во время чтения заголовка.\n");
-            return 1; // Соединение закрыто
-        }
-        totalBytesRead += bytesRead;
-    }
-
-    // Копируем заголовок в основную структуру
-    memcpy(&message->header, &header, sizeof(MessageHeader));
-
-    // --- Этап 2: Преобразование длины тела и чтение тела ---
-    uint16_t bodyLen = ntohs(message->header.body_length); // Преобразуем длину из сетевого порядка
-
-    if (bodyLen > MAX_MESSAGE_BODY_SIZE) {
-        fprintf(stderr, "Ошибка: Длина тела (%u) превышает максимальный размер (%d).\n", bodyLen, MAX_MESSAGE_BODY_SIZE);
-        return -1; // Ошибка - неверная длина
-    }
-
-    if (bodyLen > 0) { // Читаем тело, только если оно есть
-        totalBytesRead = 0;
-        while (totalBytesRead < bodyLen) {
-            do {
-                bytesRead = recv(socketFD, message->body + totalBytesRead, bodyLen - totalBytesRead, 0);
-            } while (bytesRead < 0 && errno == EINTR); // Повторить при прерывании сигналом
-
-            if (bytesRead < 0) {
-                perror("Ошибка получения тела сообщения");
-                return -1; // Ошибка
-            } else if (bytesRead == 0) {
-                printf("Соединение закрыто удаленной стороной во время чтения тела.\n");
-                return 1; // Соединение закрыто
-            }
-            totalBytesRead += bytesRead;
-        }
-    }
-
-    // --- Этап 3: Преобразование остальных полей ---
-    // Важно: message_to_host_byte_order ожидает body_length в *сетевом* порядке,
-    // но сама body_length уже в хост-порядке после ntohs выше.
-    // Мы уже прочитали тело нужной длины bodyLen (в хост-порядке).
-    // Вызовем преобразование, функция сама обработает body_length.
-    message_to_host_byte_order(message); // Преобразуем остальные поля
-
-    return 0; // Успех
-}
-
 
 
 /********************************************************************************/
