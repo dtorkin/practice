@@ -9,13 +9,14 @@
 #include "svm_handlers.h"
 #include "svm_timers.h"
 #include "../protocol/message_builder.h"
-#include "../protocol/message_utils.h" // <-- Добавлен include
+#include "../protocol/message_utils.h"
 #include "../io/io_common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <limits.h> // Для UINT16_MAX, UINT32_MAX
+#include <limits.h>
+#include <arpa/inet.h> // <-- ДОБАВЛЕНО для ntohs/ntohl (если нужны в printf)
 
 // --- Глобальные переменные ---
 SVMState currentSvmState = STATE_NOT_INITIALIZED;
@@ -47,7 +48,7 @@ void handle_init_channel_message(IOInterface *io, int clientSocketFD, Message *r
                                 bcbCounter,
                                 currentMessageCounter++
                                 );
-	if (send_protocol_message(io, clientSocketFD, &confirmMessage) != 0) { // <-- Используем io и новую функцию
+	if (send_protocol_message(io, clientSocketFD, &confirmMessage) != 0) {
 		 fprintf(stderr, "SVM: Ошибка отправки подтверждения инициализации\n");
 	} else {
 	    printf("Отправлено сообщение подтверждения инициализации\n");
@@ -57,7 +58,7 @@ void handle_init_channel_message(IOInterface *io, int clientSocketFD, Message *r
 
 // [4.2.2] «Подтверждение инициализации канала» (заглушка)
 void handle_confirm_init_message(IOInterface *io, int clientSocketFD, Message *receivedMessage) {
-	(void)io; // Подавляем предупреждение
+	(void)io;
 	(void)clientSocketFD;
     (void)receivedMessage;
     printf("SVM получил сообщение Confirm Init (не ожидается)\n");
@@ -73,23 +74,16 @@ void handle_provesti_kontrol_message(IOInterface *io, int clientSocketFD, Messag
 
     ProvestiKontrolBody *receivedBody = (ProvestiKontrolBody *)receivedMessage->body;
 
-    // Ищем адрес СВМ в полученном сообщении (хотя это нелогично для запроса)
-    // Логичнее использовать фиксированный адрес SVM или адрес из конфигурации
-    // Но пока оставим так, как было в create_podtverzhdenie_kontrolya_message
-    LogicalAddress svm_lak = (LogicalAddress)receivedMessage->header.address; // Предполагаем, что UVM шлет на наш адрес
-    if (svm_lak == LOGICAL_ADDRESS_UVM_VAL) { // Если вдруг UVM прислал свой адрес
-        svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем дефолтный
-        fprintf(stderr, "Warning: ProvestiKontrol message received with UVM address in header, using default SVM LAK for response.\n");
-    }
-
+    LogicalAddress svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем известный адрес SVM
+    // Проверка адреса в заголовке больше не нужна
 
     Message confirmMessage = create_podtverzhdenie_kontrolya_message(
-                                svm_lak, // Используем адрес СВМ
+                                svm_lak,
                                 receivedBody->tk,
                                 bcbCounter,
                                 currentMessageCounter++
                                 );
-	if (send_protocol_message(io, clientSocketFD, &confirmMessage) != 0) { // <-- Используем io и новую функцию
+	if (send_protocol_message(io, clientSocketFD, &confirmMessage) != 0) {
 		 fprintf(stderr, "SVM: Ошибка отправки подтверждения контроля\n");
 	} else {
 	    printf("Отправлено сообщение подтверждения контроля\n");
@@ -106,30 +100,25 @@ void handle_podtverzhdenie_kontrolya_message(IOInterface *io, int clientSocketFD
 
 // [4.2.5] «Выдать результаты контроля»
 void handle_vydat_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Message *receivedMessage) {
-    (void)receivedMessage; // receivedMessage не используется здесь
 	printf("Получено сообщение выдать результаты контроля\n");
 
 	uint8_t rsk = 0x3F;
 	uint16_t vsk = 150;
-    LogicalAddress svm_lak = (LogicalAddress)receivedMessage->header.address; // Адрес, на который пришел запрос
-     if (svm_lak == LOGICAL_ADDRESS_UVM_VAL) { // Если вдруг UVM прислал свой адрес
-        svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем дефолтный
-        fprintf(stderr, "Warning: VydatRezultatyKontrolya message received with UVM address in header, using default SVM LAK for response.\n");
-    }
-
+    LogicalAddress svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем известный адрес SVM
 
 	Message resultsMessage = create_rezultaty_kontrolya_message(
-                                svm_lak, // Используем адрес СВМ
+                                svm_lak,
                                 rsk,
                                 vsk,
                                 bcbCounter,
                                 currentMessageCounter++
                                 );
-	if (send_protocol_message(io, clientSocketFD, &resultsMessage) != 0) { // <-- Используем io и новую функцию
+	if (send_protocol_message(io, clientSocketFD, &resultsMessage) != 0) {
 		fprintf(stderr, "SVM: Ошибка отправки результатов контроля\n");
 	} else {
 	    printf("Отправлено сообщение с результатами контроля\n");
     }
+    (void)receivedMessage; // Подавляем предупреждение
 }
 
 // [4.2.6] «Результаты контроля» (заглушка)
@@ -142,30 +131,26 @@ void handle_rezultaty_kontrolya_message(IOInterface *io, int clientSocketFD, Mes
 
 // [4.2.7] «Выдать состояние линии»
 void handle_vydat_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Message *receivedMessage) {
-     (void)receivedMessage; // receivedMessage не используется здесь
 	printf("Получено сообщение выдать состояние линии\n");
 
 	print_counters();
 
-    LogicalAddress svm_lak = (LogicalAddress)receivedMessage->header.address; // Адрес, на который пришел запрос
-     if (svm_lak == LOGICAL_ADDRESS_UVM_VAL) { // Если вдруг UVM прислал свой адрес
-        svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем дефолтный
-        fprintf(stderr, "Warning: VydatSostoyanieLinii message received with UVM address in header, using default SVM LAK for response.\n");
-    }
+    LogicalAddress svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL; // Используем известный адрес SVM
 
 	Message sostoyanieMessage = create_sostoyanie_linii_message(
-                                svm_lak, // Используем адрес СВМ
+                                svm_lak,
                                 linkUpChangesCounter,
                                 linkUpLowTimeSeconds,
                                 signDetChangesCounter,
                                 bcbCounter,
                                 currentMessageCounter++
                                 );
-	if (send_protocol_message(io, clientSocketFD, &sostoyanieMessage) != 0) { // <-- Используем io и новую функцию
+	if (send_protocol_message(io, clientSocketFD, &sostoyanieMessage) != 0) {
 		fprintf(stderr, "SVM: Ошибка отправки состояния линии\n");
 	} else {
 	    printf("Отправлено сообщение состояния линии\n");
     }
+    (void)receivedMessage; // Подавляем предупреждение
 }
 
 // [4.2.8] «Состояние линии» (заглушка)
@@ -180,7 +165,6 @@ void handle_sostoyanie_linii_message(IOInterface *io, int clientSocketFD, Messag
 void handle_prinyat_parametry_so_message(IOInterface *io, int clientSocketFD, Message *receivedMessage) {
 	(void)io;
     (void)clientSocketFD;
-    // PrinyatParametrySoBody *body = (PrinyatParametrySoBody *)receivedMessage->body; // Для использования параметров
     (void)receivedMessage;
     printf("SVM получил сообщение 'Принять параметры СО' (заглушка)\n");
 }
@@ -191,6 +175,7 @@ void handle_prinyat_time_ref_range_message(IOInterface *io, int clientSocketFD, 
     (void)clientSocketFD;
     printf("SVM получил сообщение 'Принять TIME_REF_RANGE' (заглушка)\n");
 	PrinyatTimeRefRangeBody *body = (PrinyatTimeRefRangeBody*)receivedMessage->body;
+	// Данные уже в хост-порядке (int8_t не меняются)
 	printf("  time_ref_range[0]: imag=%d, real=%d\n", body->time_ref_range[0].imag, body->time_ref_range[0].real);
 }
 
@@ -198,10 +183,10 @@ void handle_prinyat_time_ref_range_message(IOInterface *io, int clientSocketFD, 
 void handle_prinyat_reper_message(IOInterface *io, int clientSocketFD, Message *receivedMessage) {
 	(void)io;
     (void)clientSocketFD;
-	printf("SVM получил сообщение 'Принять Reper' (заглушка)\n");
+    printf("SVM получил сообщение 'Принять Reper' (заглушка)\n");
 	PrinyatReperBody *body = (PrinyatReperBody*)receivedMessage->body;
-	// Выводим значения в хостовом порядке, как они есть после message_to_host_byte_order
-	printf("  Reper 1: NTSO=%u, R=%u, A=%u\n", body->NTSO1, body->ReperR1, body->ReperA1); // Убрали ntohs()
+	// Данные уже в хост-порядке после receive_protocol_message -> message_to_host_byte_order
+	printf("  Reper 1: NTSO=%u, R=%u, A=%u\n", body->NTSO1, body->ReperR1, body->ReperA1); // Убрали ntohs
 }
 
 // [4.2.12] «Принять параметры СДР» (заглушка)
@@ -209,16 +194,6 @@ void handle_prinyat_parametry_sdr_message(IOInterface *io, int clientSocketFD, M
 	(void)io;
     (void)clientSocketFD;
     printf("SVM получил сообщение 'Принять параметры СДР' (заглушка)\n");
-    // Здесь нужно будет прочитать базовую часть и потом массив HRR
-    // PrinyatParametrySdrBodyBase *base_body = (PrinyatParametrySdrBodyBase *)receivedMessage->body;
-    // uint16_t mrr = ntohs(base_body->mrr); // Получаем MRR
-    // printf("  MRR = %u\n", mrr);
-    // if (receivedMessage->header.body_length != sizeof(PrinyatParametrySdrBodyBase) + mrr * sizeof(complex_fixed16_t)) {
-    //    fprintf(stderr, "  Warning: Incorrect body length for Prinyat Parametry SDR\n");
-    // } else {
-    //    complex_fixed16_t *hrr_data = (complex_fixed16_t *)(receivedMessage->body + sizeof(PrinyatParametrySdrBodyBase));
-    //    // Обработка hrr_data...
-    // }
     (void)receivedMessage;
 }
 
@@ -228,8 +203,8 @@ void handle_prinyat_parametry_3tso_message(IOInterface *io, int clientSocketFD, 
     (void)clientSocketFD;
 	printf("SVM получил сообщение 'Принять параметры 3ЦО' (заглушка)\n");
 	PrinyatParametry3TsoBody *body = (PrinyatParametry3TsoBody *)receivedMessage->body;
-	// Преобразуем перед использованием/выводом
-	printf("  Ncadr: %u\n", ntohs(body->Ncadr));
+	// Данные уже в хост-порядке
+	printf("  Ncadr: %u\n", body->Ncadr); // Убрали ntohs
 	printf("  Xnum: %u\n", body->Xnum);
 }
 
@@ -246,7 +221,7 @@ void handle_prinyat_ref_azimuth_message(IOInterface *io, int clientSocketFD, Mes
 	}
 
 	PrinyatRefAzimuthBody *body = (PrinyatRefAzimuthBody*)receivedMessage->body;
-	// NTSO и массив уже преобразованы в host order функцией message_to_host_byte_order
+	// Данные уже в хост-порядке
 	printf("  NTSO: %u\n", body->NTSO);
 	printf("  ref_azimuth[0]: %d\n", body->ref_azimuth[0]);
 	printf("  ref_azimuth[%d]: %d\n", REF_AZIMUTH_SIZE - 1, body->ref_azimuth[REF_AZIMUTH_SIZE - 1]);
@@ -257,11 +232,6 @@ void handle_prinyat_parametry_tsd_message(IOInterface *io, int clientSocketFD, M
 	(void)io;
     (void)clientSocketFD;
 	printf("SVM получил сообщение 'Принять параметры ЦДР' (заглушка)\n");
-    // PrinyatParametryTsdBodyBase *base_body = (PrinyatParametryTsdBodyBase *)receivedMessage->body;
-    // uint16_t nin = ntohs(base_body->nin);
-    // uint16_t nout = ntohs(base_body->nout);
-    // uint8_t nar = base_body->nar;
-    // // Проверить длину тела и извлечь массивы...
 	(void)receivedMessage;
 }
 
@@ -270,8 +240,6 @@ void handle_navigatsionnye_dannye_message(IOInterface *io, int clientSocketFD, M
 	(void)io;
     (void)clientSocketFD;
 	printf("SVM получил сообщение 'Навигационные данные' (заглушка)\n");
-    // NavigatsionnyeDannyeBody *body = (NavigatsionnyeDannyeBody*)receivedMessage->body;
-    // Обработать body->mnd
 	(void)receivedMessage;
 }
 
