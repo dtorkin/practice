@@ -6,6 +6,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stdbool.h>
 #include "../io/io_interface.h"
 #include "../protocol/protocol_defs.h"
 
