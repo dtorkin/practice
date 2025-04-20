@@ -1,0 +1,4 @@
+*.o
+*.out
+svm_app
+uvm_app
