@@ -94,12 +94,18 @@ static int ethernet_connect(IOInterface *self) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(config->port);
-    if (inet_pton(AF_INET, config->target_ip, &server_addr.sin_addr) <= 0) {
-        perror("ethernet_connect: Invalid server address");
-        close(self->io_handle);
-        self->io_handle = -1;
-        return -1;
-    }
+	int pton_res = inet_pton(AF_INET, config->target_ip, &server_addr.sin_addr);
+	if (pton_res == 0) {
+		fprintf(stderr, "ethernet_connect: Invalid server address format: %s\n", config->target_ip);
+		close(self->io_handle);
+		self->io_handle = -1;
+		return -1;
+	} else if (pton_res < 0) {
+		perror("ethernet_connect: inet_pton failed");
+		close(self->io_handle);
+		self->io_handle = -1;
+		return -1;
+	}
 
     // Подключаемся
     if (connect(self->io_handle, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
@@ -143,17 +149,7 @@ static int ethernet_listen(IOInterface *self) {
     // Готовим адрес для прослушивания
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    // Слушаем на всех интерфейсах или на указанном IP
-    if (strcmp(config->target_ip, "0.0.0.0") == 0 || strcmp(config->target_ip, "") == 0) {
-         server_addr.sin_addr.s_addr = INADDR_ANY;
-    } else {
-         if (inet_pton(AF_INET, config->target_ip, &server_addr.sin_addr) <= 0) {
-            perror("ethernet_listen: Invalid listen address");
-            close(self->io_handle);
-            self->io_handle = -1;
-            return -1;
-        }
-    }
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY); // Всегда слушаем на всех локальных IP
     server_addr.sin_port = htons(config->port);
 
     // Привязываем сокет

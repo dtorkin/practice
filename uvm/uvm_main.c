@@ -127,7 +127,7 @@ int main(int argc, char* argv[] ) {
     if (pthread_cond_init(&uvm_send_counter_cond, NULL) != 0) { perror("UVM: Failed to init send counter cond var"); pthread_mutex_destroy(&uvm_send_counter_mutex); exit(EXIT_FAILURE); }
 
 	printf("UVM: Создание интерфейса типа '%s'...\n", config.interface_type);
-    if (strcasecmp(config.interface_type, "ethernet") == 0) { io_uvm = create_ethernet_interface(&config.ethernet); }
+    if (strcasecmp(config.interface_type, "ethernet") == 0) { io_uvm = create_ethernet_interface(&config.uvm_ethernet_target); }
     else if (strcasecmp(config.interface_type, "serial") == 0) { io_uvm = create_serial_interface(&config.serial); }
     else { fprintf(stderr, "UVM: Неподдерживаемый тип интерфейса '%s'.\n", config.interface_type); goto cleanup; } // Используем cleanup
     if (!io_uvm) { fprintf(stderr, "UVM: Не удалось создать IOInterface.\n"); goto cleanup; } // Используем cleanup

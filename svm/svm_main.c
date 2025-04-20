@@ -106,17 +106,20 @@ int main(int argc, char *argv[]) {
     // Создание IO интерфейса
     printf("SVM: Creating IO interface type '%s' for port %u, LAK 0x%02X...\n",
            config.interface_type, listen_port, svm_logical_address);
-    if (strcasecmp(config.interface_type, "ethernet") == 0) {
-    // Создаем временную копию EthernetConfig с нужным портом
-    EthernetConfig instance_eth_config = config.uvm_ethernet_target; // Берем базовую (хотя она для UVM)
-    instance_eth_config.port = listen_port; // Устанавливаем порт для этого SVM
-    // strcpy(instance_eth_config.target_ip, "0.0.0.0"); // SVM должен слушать на всех IP
-    io_svm = create_ethernet_interface(&instance_eth_config);
+	if (strcasecmp(config.interface_type, "ethernet") == 0) {
+		// Создаем конфигурацию ТОЛЬКО с портом, который нужен для bind/listen
+		EthernetConfig listen_config;
+		memset(&listen_config, 0, sizeof(listen_config)); // Обнуляем
+		listen_config.port = listen_port; // Устанавливаем нужный порт
+		// target_ip оставляем пустым или null, create_ethernet_interface
+		// должен сам использовать INADDR_ANY для listen, если target_ip не указан или пуст.
+		// УБЕДИТЕСЬ, ЧТО io_ethernet.c -> ethernet_listen использует INADDR_ANY при bind, если IP не задан.
+		io_svm = create_ethernet_interface(&listen_config);
 	} else {
-        fprintf(stderr, "SVM: Only ethernet interface type is supported.\n");
-        destroy_svm_counters_mutex_and_cond();
-        exit(EXIT_FAILURE);
-    }
+		fprintf(stderr, "SVM: Only ethernet interface type is supported.\n");
+		destroy_svm_counters_mutex_and_cond();
+		exit(EXIT_FAILURE);
+	}
     if (!io_svm) { /* ... */ destroy_svm_counters_mutex_and_cond(); exit(EXIT_FAILURE); }
 
     // Создание очередей
