@@ -29,14 +29,16 @@
 #include "../io/io_interface.h"
 #include "../config/config.h"
 #include "../utils/ts_queue.h"
+#include "../utils/ts_queued_msg_queue.h"
 #include "svm_handlers.h"
 #include "svm_timers.h" // Для init/destroy_svm_timer_sync, stop_timer_thread_signal
 #include "svm_types.h"  // Для SvmInstance, MAX_SVM_INSTANCES, QueuedMessage
 
 // --- Глобальные переменные ---
 SvmInstance svm_instances[MAX_SVM_INSTANCES]; // Массив экземпляров СВ-М
-ThreadSafeQueue *svm_outgoing_queue = NULL;   // Общая исходящая очередь
+ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;   // Общая исходящая очередь
 IOInterface *io_svm = NULL;                   // Общий IO интерфейс
+ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;   // Общая исходящая очередь QueuedMessage
 pthread_mutex_t svm_instances_mutex;          // Мьютекс для доступа к массиву svm_instances
 int listen_socket_fd = -1;                    // Слушающий сокет (если TCP)
 volatile bool keep_running = true;            // Флаг для грациозного завершения (заменяет global_timer_keep_running)
@@ -146,7 +148,7 @@ int main() {
     }
 
     // Создание общей исходящей очереди
-    svm_outgoing_queue = queue_create(100 * MAX_SVM_INSTANCES); // Увеличенный размер
+svm_outgoing_queue = qmq_create(100 * MAX_SVM_INSTANCES); // Используем новую функцию
     if (!svm_outgoing_queue) {
         fprintf(stderr, "SVM: Failed to create global outgoing queue.\n");
         goto cleanup_io;
@@ -229,7 +231,7 @@ int main() {
                 instance->link_status_timer_counter = 0;
 
                 // Создаем входящую очередь для экземпляра
-                instance->incoming_queue = queue_create(100);
+                instance->incoming_queue = qmq_create(100);
                 if (!instance->incoming_queue) {
                     fprintf(stderr, "SVM: Failed to create incoming queue for instance %d. Rejecting connection.\n", instance_slot);
                     io_svm->disconnect(io_svm, client_handle);
@@ -282,7 +284,7 @@ cleanup_threads: // Сюда попадаем при ошибке запуска
     printf("SVM: Initiating shutdown due to initialization error...\n");
     keep_running = false; // Устанавливаем флаг
     stop_timer_thread_signal(); // Сигналим таймеру
-    if (svm_outgoing_queue) queue_shutdown(svm_outgoing_queue); // Закрываем общую исходящую
+    if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue); // Закрываем общую исходящую
 
     // Дожидаемся общие потоки, если они были запущены
     if (timer_tid != 0) pthread_join(timer_tid, NULL);
@@ -356,10 +358,10 @@ main_shutdown_sequence: // Сюда перейдем после нормальн
     // --- Очистка ресурсов ---
 cleanup_queues:
 	printf("SVM: Cleaning up queues...\n");
-    if (svm_outgoing_queue) queue_destroy(svm_outgoing_queue);
+    if (svm_outgoing_queue) qmq_destroy(svm_outgoing_queue);
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         if (svm_instances[i].incoming_queue) {
-            queue_destroy(svm_instances[i].incoming_queue);
+            qmq_destroy(svm_instances[i].incoming_queue);
         }
     }
 

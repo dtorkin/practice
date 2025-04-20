@@ -16,12 +16,14 @@
 #include <errno.h>
 #include "../io/io_common.h"
 #include "../utils/ts_queue.h"
+#include "../utils/ts_queued_msg_queue.h"
 #include "svm_timers.h" // Для global_timer_keep_running
 #include "svm_types.h"  // Для SvmInstance, QueuedMessage
 
 // Внешние переменные
-extern ThreadSafeQueue *svm_outgoing_queue; // Общая исходящая очередь
+extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue; // Общая исходящая очередь
 extern SvmInstance svm_instances[MAX_SVM_INSTANCES]; // Массив экземпляров
+extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;   // Общая исходящая очередь QueuedMessage
 extern volatile bool global_timer_keep_running; // Глобальный флаг остановки
 extern pthread_mutex_t svm_instances_mutex; // Мьютекс для доступа к массиву экземпляров
 
@@ -33,7 +35,7 @@ void* sender_thread_func(void* arg) {
 
     while(true) {
         // Пытаемся извлечь сообщение из ОБЩЕЙ ИСХОДЯЩЕЙ очереди
-        if (!queue_dequeue(svm_outgoing_queue, &queuedMsgToSend)) {
+        if (!qmq_dequeue(svm_outgoing_queue, &queuedMsgToSend)) {
             // Очередь пуста и закрыта, или ошибка
             if (!global_timer_keep_running && svm_outgoing_queue->count == 0) {
                  printf("Sender Thread: Outgoing queue empty and shutdown signaled. Exiting.\n");
@@ -101,7 +103,7 @@ void* sender_thread_func(void* arg) {
 
                      // Закрываем входящую очередь этого экземпляра, чтобы разбудить его процессор
                      if (svm_instances[instance_id].incoming_queue) {
-                          queue_shutdown(svm_instances[instance_id].incoming_queue);
+                          qmq_shutdown(svm_instances[instance_id].incoming_queue);
                      }
                      // Можно также отменить потоки Receiver/Processor, но лучше дать им завершиться штатно
                  }

@@ -13,6 +13,7 @@
 #include <errno.h>
 #include "../io/io_common.h"
 #include "../utils/ts_queue.h"
+#include "../utils/ts_queued_msg_queue.h"
 #include "svm_timers.h" // Для global_timer_keep_running (как внешний флаг)
 #include "svm_types.h"  // Для SvmInstance, QueuedMessage
 #include <stdbool.h>
@@ -62,7 +63,7 @@ void* receiver_thread_func(void* arg) {
             memcpy(&q_msg.message, &receivedMessage, sizeof(Message)); // Простое копирование
 
             // Помещаем сообщение во ВХОДЯЩУЮ очередь ЭТОГО экземпляра
-            if (!queue_enqueue(instance->incoming_queue, &q_msg)) {
+            if (!qmq_enqueue(instance->incoming_queue, &q_msg)) {
                  if (global_timer_keep_running && instance->is_active) {
                     fprintf(stderr, "Receiver Thread (Inst %d): Failed to enqueue message to instance incoming queue (maybe shutdown?). Stopping instance.\n", instance->id);
                  }
@@ -87,7 +88,7 @@ void* receiver_thread_func(void* arg) {
             // Сигнализируем процессору этого экземпляра, что новых сообщений не будет
             if (instance->incoming_queue) {
                 printf("Receiver Thread (Inst %d): Shutting down incoming queue.\n", instance->id);
-                queue_shutdown(instance->incoming_queue);
+                qmq_shutdown(instance->incoming_queue);
             }
             break; // Выходим из while
         }

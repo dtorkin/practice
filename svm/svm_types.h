@@ -12,7 +12,8 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include "../protocol/protocol_defs.h"
-#include "../utils/ts_queue_fwd.h" // Используем предварительное объявление для ThreadSafeQueue
+#include "../utils/ts_queued_msg_queue.h"
+#include "../utils/ts_queued_msg_queue_fwd.h" // Используем предварительное объявление для ThreadSafeQueuedMsgQueue
 #include "../io/io_interface.h"
 
 // Максимальное количество эмулируемых экземпляров СВ-М
@@ -34,7 +35,7 @@ typedef struct SvmInstance {
     bool is_active;              // Флаг, активен ли экземпляр (есть ли клиент)
     LogicalAddress assigned_lak; // Назначенный ЛАК для этого СВ-М
 
-    ThreadSafeQueue *incoming_queue; // Входящая очередь сообщений для этого экземпляра
+	ThreadSafeQueuedMsgQueue *incoming_queue; // Входящая очередь QueuedMessage для этого экземпляра
     // Исходящая очередь будет общей (svm_outgoing_queue в svm_main)
 
     // --- Состояние, специфичное для экземпляра ---

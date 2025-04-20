@@ -16,12 +16,13 @@
 #include "../protocol/protocol_defs.h"
 #include "../protocol/message_utils.h"
 #include "../utils/ts_queue.h"
+#include "../utils/ts_queued_msg_queue.h"
 #include "svm_handlers.h"
 #include "svm_timers.h" // Для global_timer_keep_running
 #include "svm_types.h"  // Для SvmInstance, QueuedMessage
 
 // Внешние переменные (доступны из main)
-extern ThreadSafeQueue *svm_outgoing_queue; // Общая исходящая очередь
+extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue; // Общая исходящая очередь
 // extern SvmInstance svm_instances[MAX_SVM_INSTANCES]; // Не нужен прямой доступ к массиву здесь
 extern volatile bool global_timer_keep_running; // Глобальный флаг остановки
 
@@ -37,7 +38,7 @@ void* processor_thread_func(void* arg) {
 
     while (true) {
         // Пытаемся извлечь сообщение из ВХОДЯЩЕЙ очереди ЭТОГО экземпляра
-        if (!queue_dequeue(instance->incoming_queue, &processing_q_msg)) {
+        if (!qmq_dequeue(instance->incoming_queue, &processing_q_msg)) {
             // Очередь пуста и закрыта (Receiver завершился или shutdown из main)
             // Проверяем глобальный флаг или активность экземпляра (хотя is_active может быть неактуально, если main вызвал shutdown)
             if (!global_timer_keep_running || instance->incoming_queue->shutdown) {
@@ -96,7 +97,7 @@ void* processor_thread_func(void* arg) {
             free(responseMessagePtr); // Освобождаем память, выделенную в handler'е
 
             // Помещаем ответ в ОБЩУЮ ИСХОДЯЩУЮ очередь
-            if (!queue_enqueue(svm_outgoing_queue, &response_q_msg)) {
+            if (!qmq_enqueue(svm_outgoing_queue, &response_q_msg)) {
                 fprintf(stderr, "Processor Thread (Inst %d): Failed to enqueue response (type %u) to global outgoing queue.\n",
                        instance->id, response_q_msg.message.header.message_type);
                 // Если не удалось поместить в исходящую очередь, она может быть закрыта (глобальное завершение)
