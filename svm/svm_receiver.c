@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <sys/socket.h>
 #include "../io/io_common.h"
 #include "../utils/ts_queue.h" // Используем обычную очередь
 #include "svm_timers.h" // Для timer_thread_running

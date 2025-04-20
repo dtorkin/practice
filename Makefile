@@ -17,43 +17,43 @@ UVM_TARGET = uvm_app
 
 # Модуль SVM
 SVM_SRCS = svm/svm_main.c \
-		   svm/svm_handlers.c \
-		   svm/svm_timers.c \
-		   svm/svm_receiver.c \
-		   svm/svm_processor.c \
-		   svm/svm_sender.c
+           svm/svm_handlers.c \
+           svm/svm_timers.c \
+           svm/svm_receiver.c \
+           svm/svm_processor.c \
+           svm/svm_sender.c
 
 # Модуль UVM
 UVM_SRCS = uvm/uvm_main.c \
-		   uvm/uvm_sender.c \
-		   uvm/uvm_receiver.c \
-		   uvm/uvm_utils.c
+           uvm/uvm_sender.c \
+           uvm/uvm_receiver.c \
+           uvm/uvm_utils.c
 
 # Модуль Protocol
 PROTOCOL_SRCS = protocol/message_utils.c \
-				protocol/message_builder.c
+                protocol/message_builder.c
 
 # Модуль IO
 IO_SRCS = io/io_common.c \
-		  io/io_ethernet.c \
-		  io/io_serial.c
+          io/io_ethernet.c \
+          io/io_serial.c
 
 # Модуль Config
 CONFIG_SRCS = config/config.c \
-			  config/ini.c
+              config/ini.c
 
 # Модуль Utils
+# УБРАН ts_queued_msg_queue.c, т.к. мы откатили SVM к использованию ts_queue
 UTILS_SRCS = utils/ts_queue.c \
-			 utils/ts_queued_msg_queue.c \
-			 utils/ts_queue_req.c # <-- Добавлен ts_queue_req.c
+             utils/ts_queue_req.c # Оставляем ts_queue_req.c для UVM
 
 # --- Объектные файлы ---
 
 # Собираем все общие объектные файлы в одну переменную для удобства
 COMMON_OBJS = $(PROTOCOL_SRCS:.c=.o) \
-			  $(IO_SRCS:.c=.o) \
-			  $(CONFIG_SRCS:.c=.o) \
-			  $(UTILS_SRCS:.c=.o)
+              $(IO_SRCS:.c=.o) \
+              $(CONFIG_SRCS:.c=.o) \
+              $(UTILS_SRCS:.c=.o) # ts_queued_msg_queue.o автоматически убран
 
 # Объектные файлы, специфичные для SVM + общие
 SVM_OBJS = $(SVM_SRCS:.c=.o) $(COMMON_OBJS)
@@ -88,8 +88,8 @@ $(UVM_TARGET): $(UVM_OBJS)
 clean:
 	@echo "Cleaning up build files..."
 	rm -f $(SVM_TARGET) $(UVM_TARGET) \
-		  $(SVM_SRCS:.c=.o) $(UVM_SRCS:.c=.o) $(COMMON_OBJS) \
-		  core.* *.core *~
+	      $(SVM_SRCS:.c=.o) $(UVM_SRCS:.c=.o) $(COMMON_OBJS) \
+	      core.* *.core *~
 	@echo "Cleanup finished."
 
 # Фиктивные цели (не создают файлы с такими именами)
