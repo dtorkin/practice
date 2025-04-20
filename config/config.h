@@ -23,6 +23,8 @@ typedef struct {
     // Секция [serial]
     SerialConfig serial;     // Тип теперь известен из io_interface.h
 
+    int num_svm_instances; // Количество эмулируемых SVM
+    int base_svm_lak;      // Базовый логический адрес для первого 
     // Можно добавить другие секции и параметры по мере необходимости
 
 } AppConfig;

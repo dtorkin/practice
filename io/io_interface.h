@@ -30,6 +30,7 @@ typedef struct {
     IOConfigBase base;
     char target_ip[40];
     uint16_t port;
+	int base_port;
 } EthernetConfig;
 
 // --- Конфигурация для Serial ---

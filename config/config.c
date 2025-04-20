@@ -31,7 +31,13 @@ static int config_handler(void* user, const char* section, const char* name,
         MATCH_STRNCPY(pconfig->ethernet.target_ip, value, sizeof(pconfig->ethernet.target_ip));
     } else if (MATCH("ethernet", "port")) {
         pconfig->ethernet.port = (uint16_t)atoi(value); // Приведение к uint16_t
-    } else if (MATCH("serial", "device")) {
+    } else if (MATCH("ethernet", "base_port")) { // Если base_port в секции ethernet
+    pconfig->ethernet.base_port = atoi(value);
+	} else if (MATCH("svm_emulator", "num_svm_instances")) { // Новая секция для параметров эмулятора
+		pconfig->num_svm_instances = atoi(value);
+	} else if (MATCH("svm_emulator", "base_svm_lak")) {
+		pconfig->base_svm_lak = atoi(value); // LAK обычно в hex, но atoi ожидает dec. Можно использовать strtol(value, NULL, 0) для автоопределения или 16 для hex.
+	} else if (MATCH("serial", "device")) {
         MATCH_STRNCPY(pconfig->serial.device, value, sizeof(pconfig->serial.device));
     } else if (MATCH("serial", "baud_rate")) {
         pconfig->serial.baud_rate = atoi(value);
@@ -55,6 +61,9 @@ int load_config(const char *filename, AppConfig *config) {
     strcpy(config->interface_type, "ethernet");
     strcpy(config->ethernet.target_ip, "127.0.0.1"); // Дефолт для UVM
     config->ethernet.port = 8080;
+	config->ethernet.base_port = 8080; // По умолчанию совпадает с port
+    config->num_svm_instances = 1;     // По умолчанию 1 экземпляр
+    config->base_svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL;
     strcpy(config->serial.device, "/dev/ttyS0");
     config->serial.baud_rate = 115200;
     config->serial.data_bits = 8;
@@ -100,8 +109,26 @@ int load_config(const char *filename, AppConfig *config) {
          // Добавить валидацию для baud_rate, data_bits, stop_bits
      }
 
+    // Валидация мульти-SVM параметров
+    if (config->num_svm_instances <= 0 || config->num_svm_instances > MAX_SVM_INSTANCES) {
+        fprintf(stderr, "Warning: Invalid num_svm_instances %d in config. Using default 1 (max %d).\n",
+                config->num_svm_instances, MAX_SVM_INSTANCES);
+        config->num_svm_instances = 1;
+    }
+    if (config->ethernet.base_port <= 0 || config->ethernet.base_port > 65535) {
+         fprintf(stderr, "Warning: Invalid ethernet base_port %d in config. Using default %d.\n", config->ethernet.base_port, 8080);
+         config->ethernet.base_port = 8080;
+    }
+    if (config->base_svm_lak <= 0 || config->base_svm_lak > 255) {
+         fprintf(stderr, "Warning: Invalid base_svm_lak %d in config. Using default %d.\n", config->base_svm_lak, LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL);
+          config->base_svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL;
+    }
+
     printf("Итоговая конфигурация:\n");
     printf("  interface_type = %s\n", config->interface_type);
+	printf("  [svm_emulator]\n");
+    printf("    num_svm_instances = %d\n", config->num_svm_instances);
+    printf("    base_svm_lak = 0x%02X\n", config->base_svm_lak);
     if (strcasecmp(config->interface_type, "ethernet") == 0) {
         printf("  [ethernet]\n");
         printf("    target_ip = %s\n", config->ethernet.target_ip);

@@ -3,15 +3,17 @@
  *
  * Описание:
  * Реализация потокобезопасной очереди.
+ * МОДИФИЦИРОВАНА для хранения QueuedMessage вместо Message.
  */
 
 #include "ts_queue.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h> // Для memcpy
-#include <arpa/inet.h> // <-- ДОБАВЛЕНО для ntohs/htons
-#include <pthread.h>   // Убедитесь, что pthread.h включен
-#include <stdbool.h> // Убедитесь, что stdbool.h включен
+#include <arpa/inet.h> // Для ntohs/htons
+#include <pthread.h>
+#include <stdbool.h>
+#include "../svm/svm_types.h" // Для QueuedMessage и Message
 
 ThreadSafeQueue* queue_create(size_t capacity) {
     if (capacity == 0) {
@@ -25,7 +27,8 @@ ThreadSafeQueue* queue_create(size_t capacity) {
         return NULL;
     }
 
-    queue->buffer = (Message*)malloc(capacity * sizeof(Message));
+    // Выделяем память под QueuedMessage
+    queue->buffer = (QueuedMessage*)malloc(capacity * sizeof(QueuedMessage));
     if (!queue->buffer) {
         perror("queue_create: Failed to allocate queue buffer");
         free(queue);
@@ -60,7 +63,7 @@ ThreadSafeQueue* queue_create(size_t capacity) {
         return NULL;
     }
 
-    printf("Thread-safe queue created with capacity %zu\n", capacity);
+    printf("Thread-safe queue created with capacity %zu (for QueuedMessage)\n", capacity);
     return queue;
 }
 
@@ -73,13 +76,13 @@ void queue_destroy(ThreadSafeQueue *queue) {
     pthread_mutex_destroy(&queue->mutex);
     pthread_cond_destroy(&queue->cond_not_empty);
     pthread_cond_destroy(&queue->cond_not_full);
-    free(queue->buffer);
+    free(queue->buffer); // Освобождаем буфер QueuedMessage
     free(queue);
     printf("Thread-safe queue destroyed\n");
 }
 
-bool queue_enqueue(ThreadSafeQueue *queue, const Message *message) {
-    if (!queue || !message) return false;
+bool queue_enqueue(ThreadSafeQueue *queue, const QueuedMessage *queued_message) {
+    if (!queue || !queued_message) return false;
 
     pthread_mutex_lock(&queue->mutex);
 
@@ -90,68 +93,60 @@ bool queue_enqueue(ThreadSafeQueue *queue, const Message *message) {
 
     if (queue->shutdown) {
         pthread_mutex_unlock(&queue->mutex);
-        return false;
+        return false; // Очередь закрыта
     }
 
-    // Получаем длину тела в хост-порядке перед memcpy
-    // Заголовок в message уже должен быть в сетевом порядке, кроме body_length
-    uint16_t body_len_host = ntohs(message->header.body_length); // Используем ntohs
-    size_t message_size = sizeof(MessageHeader) + body_len_host;
+    // Копируем всю структуру QueuedMessage
+    // Внутренняя логика проверки размера тела Message должна быть ВЫШЕ
+    // по стеку вызовов, перед вызовом queue_enqueue, если это нужно.
+    // Здесь мы доверяем, что queued_message содержит корректные данные.
+    memcpy(&queue->buffer[queue->head], queued_message, sizeof(QueuedMessage));
 
-    if (message_size > sizeof(Message)) {
-         fprintf(stderr,"Error: Message size %zu exceeds buffer size %zu in enqueue\n", message_size, sizeof(Message));
-         message_size = sizeof(Message); // Ограничиваем копирование
-    }
-
-    memcpy(&queue->buffer[queue->head], message, message_size);
-    // Длина тела в буфере должна остаться в сетевом порядке
-    queue->buffer[queue->head].header.body_length = message->header.body_length;
-
+    // Обработка сетевого порядка байт для длины тела ВНУТРИ сообщения
+    // происходит при СОЗДАНИИ сообщения перед вызовом enqueue
+    // и при ИСПОЛЬЗОВАНИИ сообщения после dequeue. Очередь просто хранит байты.
+    // Однако, для отладки или если структура QueuedMessage как-то сериализуется,
+    // может потребоваться конвертация здесь. Пока оставляем без изменений.
 
     queue->head = (queue->head + 1) % queue->capacity;
     queue->count++;
 
     pthread_cond_signal(&queue->cond_not_empty);
     pthread_mutex_unlock(&queue->mutex);
+    // printf("DEBUG: Enqueued message for instance %d\n", queued_message->instance_id);
     return true;
 }
 
-bool queue_dequeue(ThreadSafeQueue *queue, Message *message) {
-     if (!queue || !message) return false;
+bool queue_dequeue(ThreadSafeQueue *queue, QueuedMessage *queued_message) {
+     if (!queue || !queued_message) return false;
 
     pthread_mutex_lock(&queue->mutex);
 
+    // Ждем, пока очередь не пуста ИЛИ пока не пришел сигнал shutdown
     while (queue->count == 0 && !queue->shutdown) {
         pthread_cond_wait(&queue->cond_not_empty, &queue->mutex);
     }
 
+    // Если очередь закрыта И пуста, возвращаем false
     if (queue->shutdown && queue->count == 0) {
         pthread_mutex_unlock(&queue->mutex);
         return false;
     }
 
-    uint16_t body_len_host = ntohs(queue->buffer[queue->tail].header.body_length); // Используем ntohs
-    size_t message_size = sizeof(MessageHeader) + body_len_host;
+    // Копируем всю структуру QueuedMessage из буфера
+    memcpy(queued_message, &queue->buffer[queue->tail], sizeof(QueuedMessage));
 
-    if (message_size > sizeof(Message)) {
-         fprintf(stderr,"Error: Invalid body length %u in queue during dequeue\n", body_len_host);
-         message_size = sizeof(Message);
-         // Устанавливаем "безопасную" длину в сообщение, которое вернем
-         message->header.body_length = htons(MAX_MESSAGE_BODY_SIZE); // Используем htons
-    } else {
-         // Копируем правильный заголовок (включая длину)
-         message->header.body_length = queue->buffer[queue->tail].header.body_length;
-    }
-
-    // Копируем заголовок и тело
-    memcpy(message, &queue->buffer[queue->tail], message_size);
-
+    // Логика проверки размера тела и преобразования порядка байт (ntohs/htons)
+    // должна быть ВЫШЕ по стеку вызовов, ПОСЛЕ вызова queue_dequeue,
+    // когда получатель будет реально использовать данные из queued_message->message.
+    // Очередь просто передает байты.
 
     queue->tail = (queue->tail + 1) % queue->capacity;
     queue->count--;
 
     pthread_cond_signal(&queue->cond_not_full);
     pthread_mutex_unlock(&queue->mutex);
+    // printf("DEBUG: Dequeued message for instance %d\n", queued_message->instance_id);
     return true;
 }
 
@@ -159,9 +154,11 @@ void queue_shutdown(ThreadSafeQueue *queue) {
     if (!queue) return;
 
     pthread_mutex_lock(&queue->mutex);
-    queue->shutdown = true;
-    pthread_cond_broadcast(&queue->cond_not_empty);
-    pthread_cond_broadcast(&queue->cond_not_full);
+    if (!queue->shutdown) { // Предотвращаем повторный вывод сообщения
+       queue->shutdown = true;
+       printf("Thread-safe queue shutdown initiated.\n");
+       pthread_cond_broadcast(&queue->cond_not_empty);
+       pthread_cond_broadcast(&queue->cond_not_full);
+    }
     pthread_mutex_unlock(&queue->mutex);
-    printf("Thread-safe queue shutdown initiated.\n");
 }
