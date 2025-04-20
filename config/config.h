@@ -11,8 +11,6 @@
 
 // Включаем определения интерфейсов, где теперь определены EthernetConfig и SerialConfig
 #include "../io/io_interface.h" // Путь может быть ../io/io_interface.h в зависимости от структуры include
-#include "../protocol/protocol_defs.h"
-#include "../svm/svm_types.h"
 
 // Основная структура конфигурации
 typedef struct {
