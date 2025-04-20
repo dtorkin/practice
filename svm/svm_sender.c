@@ -23,7 +23,6 @@
 // Внешние переменные
 extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue; // Общая исходящая очередь
 extern SvmInstance svm_instances[MAX_SVM_INSTANCES]; // Массив экземпляров
-extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;   // Общая исходящая очередь QueuedMessage
 extern volatile bool global_timer_keep_running; // Глобальный флаг остановки
 extern pthread_mutex_t svm_instances_mutex; // Мьютекс для доступа к массиву экземпляров
 

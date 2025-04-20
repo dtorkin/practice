@@ -142,6 +142,7 @@ Message* handle_vydat_rezultaty_kontrolya_message(SvmInstance *instance, Message
 	if (instance->id == 1) { // Если это второй экземпляр (ID=1)
     rsk = 0x3E; // Устанавливаем бит ошибки (например, младший бит = 0)
     printf("  SVM (Inst %d): Emulating control failure (RSK=0x%02X).\n", instance->id, rsk);
+    }
 	uint16_t vsk = 150; // 150 мс
     uint32_t current_bcb = get_instance_bcb_counter(instance);
 

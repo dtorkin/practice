@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <string.h> // Для memcpy
+#include <arpa/inet.h>
 #include "../protocol/protocol_defs.h"
 #include "../protocol/message_utils.h"
 #include "../utils/ts_queue.h"

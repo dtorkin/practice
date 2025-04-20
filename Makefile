@@ -1,73 +1,96 @@
-# Компилятор и флаги
+# Имя компилятора
 CC = gcc
+# Флаги компиляции: -Wall (все предупреждения), -Wextra (доп. предупреждения), -g (отладочная информация)
+# -pthread нужен и для компиляции, и для линковки потокобезопасного кода
+# Добавляем пути ко всем директориям с заголовочными файлами через -I
 CFLAGS = -Wall -Wextra -g -Iprotocol -Iio -Isvm -Iuvm -Iconfig -Iutils -pthread
-LIBS_SVM = -lrt -pthread
-LIBS_UVM = -pthread
+# Флаги линковки: -pthread нужен для библиотеки pthreads
+LDFLAGS = -pthread
+# Необходимые библиотеки: -lrt для clock_gettime (в svm_timers.c)
+LIBS = -lrt
 
-# Исходные файлы (.c)
-SVM_C_FILES = svm/svm_main.c svm/svm_handlers.c svm/svm_timers.c \
-              svm/svm_receiver.c svm/svm_processor.c svm/svm_sender.c
-# Добавляем uvm_utils.c
-UVM_C_FILES = uvm/uvm_main.c \
-              uvm/uvm_sender.c uvm/uvm_receiver.c uvm/uvm_utils.c # <-- Добавлен
-PROTOCOL_C_FILES = protocol/message_utils.c protocol/message_builder.c
-IO_C_FILES = io/io_common.c io/io_ethernet.c io/io_serial.c
-CONFIG_C_FILES = config/config.c config/ini.c
-UTILS_QUEUE_MSG_SRC = utils/ts_queue.c
-UTILS_QUEUE_REQ_SRC = utils/ts_queue_req.c
-
-# Объектные файлы (.o)
-SVM_OBJS = $(SVM_C_FILES:.c=.o)
-UVM_OBJS = $(UVM_C_FILES:.c=.o) # <-- Теперь включает uvm_utils.o
-PROTOCOL_OBJS = $(PROTOCOL_C_FILES:.c=.o)
-IO_OBJS = $(IO_C_FILES:.c=.o)
-CONFIG_OBJS = $(CONFIG_C_FILES:.c=.o)
-UTILS_QUEUE_MSG_OBJ = $(UTILS_QUEUE_MSG_SRC:.c=.o)
-UTILS_QUEUE_REQ_OBJ = $(UTILS_QUEUE_REQ_SRC:.c=.o)
-
-# Все объектные файлы, необходимые для линковки
-ALL_SVM_OBJS = $(SVM_OBJS) $(PROTOCOL_OBJS) $(IO_OBJS) $(CONFIG_OBJS) $(UTILS_QUEUE_MSG_OBJ)
-# Добавляем uvm_utils.o в зависимости UVM
-ALL_UVM_OBJS = $(UVM_OBJS) $(PROTOCOL_OBJS) $(IO_OBJS) $(CONFIG_OBJS) $(UTILS_QUEUE_MSG_OBJ) $(UTILS_QUEUE_REQ_OBJ)
-
-# Исполняемые файлы
+# Имена исполняемых файлов
 SVM_TARGET = svm_app
 UVM_TARGET = uvm_app
 
-# Заголовочные файлы
-HEADERS = $(wildcard protocol/*.h) $(wildcard io/*.h) $(wildcard svm/*.h) \
-          $(wildcard uvm/*.h) $(wildcard config/*.h) $(wildcard utils/*.h) common.h
+# --- Исходные файлы ---
 
-# Правило по умолчанию: собрать оба
+# Модуль SVM
+SVM_SRCS = svm/svm_main.c \
+		   svm/svm_handlers.c \
+		   svm/svm_timers.c \
+		   svm/svm_receiver.c \
+		   svm/svm_processor.c \
+		   svm/svm_sender.c
+
+# Модуль UVM
+UVM_SRCS = uvm/uvm_main.c \
+		   uvm/uvm_sender.c \
+		   uvm/uvm_receiver.c \
+		   uvm/uvm_utils.c
+
+# Модуль Protocol
+PROTOCOL_SRCS = protocol/message_utils.c \
+				protocol/message_builder.c
+
+# Модуль IO
+IO_SRCS = io/io_common.c \
+		  io/io_ethernet.c \
+		  io/io_serial.c
+
+# Модуль Config
+CONFIG_SRCS = config/config.c \
+			  config/ini.c
+
+# Модуль Utils
+UTILS_SRCS = utils/ts_queue.c \
+			 utils/ts_queued_msg_queue.c \
+			 utils/ts_queue_req.c # <-- Добавлен ts_queue_req.c
+
+# --- Объектные файлы ---
+
+# Собираем все общие объектные файлы в одну переменную для удобства
+COMMON_OBJS = $(PROTOCOL_SRCS:.c=.o) \
+			  $(IO_SRCS:.c=.o) \
+			  $(CONFIG_SRCS:.c=.o) \
+			  $(UTILS_SRCS:.c=.o)
+
+# Объектные файлы, специфичные для SVM + общие
+SVM_OBJS = $(SVM_SRCS:.c=.o) $(COMMON_OBJS)
+
+# Объектные файлы, специфичные для UVM + общие
+UVM_OBJS = $(UVM_SRCS:.c=.o) $(COMMON_OBJS)
+
+# --- Правила сборки ---
+
+# Правило по умолчанию: собрать оба приложения
 all: $(SVM_TARGET) $(UVM_TARGET)
 
-# Правило для сборки SVM
-$(SVM_TARGET): $(ALL_SVM_OBJS)
-	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_SVM)
+# Правило для сборки SVM приложения
+$(SVM_TARGET): $(SVM_OBJS)
+	@echo "Linking $(SVM_TARGET)..."
+	$(CC) $(CFLAGS) $(SVM_OBJS) -o $(SVM_TARGET) $(LDFLAGS) $(LIBS)
+	@echo "SVM application ($(SVM_TARGET)) built successfully."
 
-# Правило для сборки UVM
-$(UVM_TARGET): $(ALL_UVM_OBJS)
-	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_UVM)
+# Правило для сборки UVM приложения
+$(UVM_TARGET): $(UVM_OBJS)
+	@echo "Linking $(UVM_TARGET)..."
+	$(CC) $(CFLAGS) $(UVM_OBJS) -o $(UVM_TARGET) $(LDFLAGS) $(LIBS)
+	@echo "UVM application ($(UVM_TARGET)) built successfully."
 
-# --- Правила компиляции ---
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-protocol/%.o: protocol/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-io/%.o: io/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-svm/%.o: svm/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-uvm/%.o: uvm/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-config/%.o: config/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-utils/%.o: utils/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
+# Правило для компиляции .c файлов в .o (шаблон)
+# Компилируем каждый .c файл в соответствующий .o файл в той же директории
+%.o: %.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Правило для очистки
+# Правило для очистки (удаляет объектные файлы и исполняемые файлы)
 clean:
-	rm -f $(SVM_TARGET) $(UVM_TARGET)
-	find . -name "*.o" -delete
+	@echo "Cleaning up build files..."
+	rm -f $(SVM_TARGET) $(UVM_TARGET) \
+		  $(SVM_SRCS:.c=.o) $(UVM_SRCS:.c=.o) $(COMMON_OBJS) \
+		  core.* *.core *~
+	@echo "Cleanup finished."
 
+# Фиктивные цели (не создают файлы с такими именами)
 .PHONY: all clean
