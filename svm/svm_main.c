@@ -87,23 +87,32 @@ int main(int argc, char *argv[]) {
     if (init_svm_counters_mutex_and_cond() != 0) { exit(EXIT_FAILURE); }
     init_message_handlers();
 
-    printf("SVM: Loading configuration for ID %d...\n", svm_id);
-    // Передаем ID в load_config, чтобы он прочитал нужную секцию
-    if (load_config("config.ini", &config, svm_id) != 0) {
-        destroy_svm_counters_mutex_and_cond();
-        exit(EXIT_FAILURE);
-    }
-    // Устанавливаем LAK для этого экземпляра (прочитанный из конфига)
-    svm_logical_address = config.svm_settings.lak;
-    uint16_t listen_port = config.ethernet.port; // Используем порт из прочитанной секции
+	printf("SVM (ID %d): Loading configuration...\n", svm_id);
+	// Загружаем ВСЮ конфигурацию
+	if (load_config("config.ini", &config) != 0) {
+		destroy_svm_counters_mutex_and_cond();
+		exit(EXIT_FAILURE);
+	}
+	// Проверяем, был ли конфиг для нашего ID загружен
+	if (svm_id < 0 || svm_id >= MAX_SVM_CONFIGS || !config.svm_config_loaded[svm_id]) {
+		fprintf(stderr, "SVM (ID %d): Error: Configuration section not found or invalid ID.\n", svm_id);
+		destroy_svm_counters_mutex_and_cond();
+		exit(EXIT_FAILURE);
+	}
+	// Используем параметры из нужного индекса массива
+	svm_logical_address = config.svm_settings[svm_id].lak;
+	uint16_t listen_port = config.svm_ethernet[svm_id].port;
 
     // Создание IO интерфейса
     printf("SVM: Creating IO interface type '%s' for port %u, LAK 0x%02X...\n",
            config.interface_type, listen_port, svm_logical_address);
     if (strcasecmp(config.interface_type, "ethernet") == 0) {
-        // Передаем КОНКРЕТНУЮ конфигурацию Ethernet для этого экземпляра
-        io_svm = create_ethernet_interface(&config.ethernet);
-    } else {
+    // Создаем временную копию EthernetConfig с нужным портом
+    EthernetConfig instance_eth_config = config.uvm_ethernet_target; // Берем базовую (хотя она для UVM)
+    instance_eth_config.port = listen_port; // Устанавливаем порт для этого SVM
+    // strcpy(instance_eth_config.target_ip, "0.0.0.0"); // SVM должен слушать на всех IP
+    io_svm = create_ethernet_interface(&instance_eth_config);
+	} else {
         fprintf(stderr, "SVM: Only ethernet interface type is supported.\n");
         destroy_svm_counters_mutex_and_cond();
         exit(EXIT_FAILURE);

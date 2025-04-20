@@ -121,7 +121,7 @@ int main(int argc, char* argv[] ) {
 
 	// --- Инициализация ---
 	printf("UVM: Загрузка конфигурации...\n");
-    if (load_config("config.ini", &config) != 0) { exit(EXIT_FAILURE); }
+    if (load_config("config.ini", &config) != 0) { exit(EXIT_FAILURE); } // Вызов с 2 аргументами
 
     if (pthread_mutex_init(&uvm_send_counter_mutex, NULL) != 0) { perror("UVM: Failed to init send counter mutex"); exit(EXIT_FAILURE); }
     if (pthread_cond_init(&uvm_send_counter_cond, NULL) != 0) { perror("UVM: Failed to init send counter cond var"); pthread_mutex_destroy(&uvm_send_counter_mutex); exit(EXIT_FAILURE); }
