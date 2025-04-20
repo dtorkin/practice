@@ -12,12 +12,11 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
-// Включаем svm_types.h напрямую, т.к. он определяет QueuedMessage
-#include "../svm/svm_types.h" // <-- Зависимость от SVM здесь
-#include "ts_queued_msg_queue_fwd.h" // Для struct ThreadSafeQueuedMsgQueue
+#include "../svm/svm_types.h" // <-- Включаем для определения QueuedMessage
+// #include "ts_queued_msg_queue_fwd.h" // <-- УДАЛЕНО
 
-// Определение структуры новой очереди
-struct ThreadSafeQueuedMsgQueue {
+// Определение структуры и typedef здесь
+typedef struct ThreadSafeQueuedMsgQueue {
     QueuedMessage *buffer;      // Буфер для хранения сообщений + ID экземпляра
     size_t capacity;            // Максимальная вместимость очереди
     size_t count;               // Текущее количество элементов в очереди
@@ -27,7 +26,7 @@ struct ThreadSafeQueuedMsgQueue {
     pthread_cond_t cond_not_empty; // Условная переменная: очередь не пуста
     pthread_cond_t cond_not_full;  // Условная переменная: очередь не полна
     bool shutdown;              // Флаг для сигнализации о завершении работы
-};
+} ThreadSafeQueuedMsgQueue; // <--- Typedef добавлен здесь
 
 // Функции с префиксом qmq_
 ThreadSafeQueuedMsgQueue* qmq_create(size_t capacity);
