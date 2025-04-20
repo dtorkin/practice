@@ -1,115 +1,61 @@
 /*
  * svm/svm_sender.c
- *
- * Описание:
- * Реализация ОБЩЕГО потока-отправителя.
- * Читает сообщения (QueuedMessage) из общей исходящей очереди,
- * находит нужный экземпляр по ID и отправляет сообщение клиенту.
- * Обрабатывает ошибки отправки и деактивирует экземпляр при необходимости.
+ * Описание: Поток-отправитель для ОДНОГО SVM.
+ * (Возвращено к одно-экземплярной модели)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <sys/socket.h> // Для shutdown, SHUT_RDWR
+#include <sys/socket.h> // Для shutdown
 #include <errno.h>
 #include "../io/io_common.h"
-#include "../utils/ts_queue.h"
-#include "../utils/ts_queued_msg_queue.h"
-#include "svm_timers.h" // Для global_timer_keep_running
-#include "svm_types.h"  // Для SvmInstance, QueuedMessage
+#include "../utils/ts_queue.h" // Используем обычную очередь
+#include "svm_timers.h" // Для stop_timer_thread
 
-// Внешние переменные
-extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue; // Общая исходящая очередь
-extern SvmInstance svm_instances[MAX_SVM_INSTANCES]; // Массив экземпляров
-extern volatile bool global_timer_keep_running; // Глобальный флаг остановки
-extern pthread_mutex_t svm_instances_mutex; // Мьютекс для доступа к массиву экземпляров
-
+// Внешние глобальные переменные
+extern IOInterface *io_svm;
+extern int global_client_handle;
+extern ThreadSafeQueue *svm_outgoing_queue;
+extern ThreadSafeQueue *svm_incoming_queue; // Нужен для shutdown при ошибке
+extern volatile bool keep_running;
 
 void* sender_thread_func(void* arg) {
     (void)arg;
-    printf("SVM Sender thread started (reads global outgoing queue).\n");
-    QueuedMessage queuedMsgToSend; // Буфер для извлеченного сообщения + ID
+    if (global_client_handle < 0) {
+         fprintf(stderr,"Sender Thread: Invalid client handle.\n");
+         return NULL;
+    }
+    printf("SVM Sender thread started.\n");
+    Message messageToSend; // Буфер для Message
 
     while(true) {
-        // Пытаемся извлечь сообщение из ОБЩЕЙ ИСХОДЯЩЕЙ очереди
-        if (!qmq_dequeue(svm_outgoing_queue, &queuedMsgToSend)) {
-            // Очередь пуста и закрыта, или ошибка
-            if (!global_timer_keep_running && svm_outgoing_queue->count == 0) {
-                 printf("Sender Thread: Outgoing queue empty and shutdown signaled. Exiting.\n");
+        // Пытаемся извлечь Message из исходящей очереди
+        if (!queue_dequeue(svm_outgoing_queue, &messageToSend)) {
+            if (!keep_running && svm_outgoing_queue->count == 0) {
+                 printf("Sender Thread: Outgoing queue empty and shutdown. Exiting.\n");
                  break; // Корректный выход
             }
-             if(global_timer_keep_running) {
-                 // Возможно, ложное пробуждение или ошибка
-                 usleep(10000);
-                 continue;
-             } else {
-                 // Очередь закрыта, но может содержать элементы
-                 if (svm_outgoing_queue->count == 0) {
-                    break; // Выход, если закрыта и пуста
-                 } else {
-                    continue; // Продолжаем обрабатывать остатки
-                 }
-             }
+            if (keep_running) usleep(10000);
+            continue; // Продолжаем, пока очередь не опустеет или keep_running=false
         }
 
         // Сообщение успешно извлечено
-        int instance_id = queuedMsgToSend.instance_id;
-
-        // Находим нужный экземпляр и его хэндл (под мьютексом)
-        int client_handle = -1;
-        IOInterface *io_handle = NULL;
-        bool instance_was_active = false;
-
-        pthread_mutex_lock(&svm_instances_mutex);
-        if (instance_id >= 0 && instance_id < MAX_SVM_INSTANCES && svm_instances[instance_id].is_active) {
-            instance_was_active = true;
-            client_handle = svm_instances[instance_id].client_handle;
-            io_handle = svm_instances[instance_id].io_handle;
-        } else {
-             // Если экземпляр уже не активен, просто игнорируем сообщение для него
-             // printf("Sender Thread: Instance %d is not active. Discarding message type %u.\n",
-             //        instance_id, queuedMsgToSend.message.header.message_type);
-        }
-        pthread_mutex_unlock(&svm_instances_mutex);
-
-        // Если экземпляр был активен и мы получили его хэндлы
-        if (instance_was_active && client_handle >= 0 && io_handle != NULL) {
-            // printf("Sender Thread: Sending msg type %u to instance %d (handle %d)\n",
-            //        queuedMsgToSend.message.header.message_type, instance_id, client_handle);
-
-            // Отправляем сообщение
-            if (send_protocol_message(io_handle, client_handle, &queuedMsgToSend.message) != 0) {
-                // Ошибка отправки (клиент мог отключиться между проверкой и отправкой)
-                fprintf(stderr, "Sender Thread: Error sending message (type %u) to instance %d (handle %d). Deactivating instance.\n",
-                       queuedMsgToSend.message.header.message_type, instance_id, client_handle);
-
-                // Помечаем экземпляр как неактивный и закрываем его ресурсы (под мьютексом)
-                pthread_mutex_lock(&svm_instances_mutex);
-                 if (instance_id >= 0 && instance_id < MAX_SVM_INSTANCES && svm_instances[instance_id].is_active) {
-                     // Используем shutdown для попытки разбудить Receiver
-                     if (svm_instances[instance_id].client_handle >= 0) {
-                        shutdown(svm_instances[instance_id].client_handle, SHUT_RDWR);
-                     }
-                     // Закрываем соединение через интерфейс
-                     if (svm_instances[instance_id].io_handle && svm_instances[instance_id].client_handle >= 0) {
-                         svm_instances[instance_id].io_handle->disconnect(svm_instances[instance_id].io_handle, svm_instances[instance_id].client_handle);
-                     }
-                     svm_instances[instance_id].client_handle = -1;
-                     svm_instances[instance_id].is_active = false;
-                     printf("Sender Thread: Instance %d deactivated due to send error.\n", instance_id);
-
-                     // Закрываем входящую очередь этого экземпляра, чтобы разбудить его процессор
-                     if (svm_instances[instance_id].incoming_queue) {
-                          qmq_shutdown(svm_instances[instance_id].incoming_queue);
-                     }
-                     // Можно также отменить потоки Receiver/Processor, но лучше дать им завершиться штатно
-                 }
-                pthread_mutex_unlock(&svm_instances_mutex);
-                // Не останавливаем весь Sender, продолжаем обрабатывать другие сообщения
+        // Отправляем сообщение
+        if (send_protocol_message(io_svm, global_client_handle, &messageToSend) != 0) {
+            if (keep_running) { // Логируем ошибку только если не штатное завершение
+                fprintf(stderr, "Sender Thread: Error sending message (type %u). Initiating shutdown.\n", messageToSend.header.message_type);
+                keep_running = false; // Инициируем остановку
+                // Будим остальные потоки
+                stop_timer_thread();
+                if (svm_incoming_queue) queue_shutdown(svm_incoming_queue);
+                if (svm_outgoing_queue) queue_shutdown(svm_outgoing_queue);
+                if (global_client_handle >= 0) shutdown(global_client_handle, SHUT_RDWR);
             }
+            break; // Выходим из цикла при ошибке отправки
         }
+        // Память из malloc в handler'е была освобождена в processor'е после enqueue
     } // end while
 
     printf("SVM Sender thread finished.\n");

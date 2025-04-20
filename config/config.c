@@ -1,147 +1,133 @@
 /*
  * config/config.c
- *
- * Описание:
- * Реализация функции загрузки конфигурации из INI-файла
- * с использованием библиотеки inih.
+ * Описание: Реализация функции загрузки конфигурации из INI-файла.
+ * (Модифицировано для поддержки секций для разных SVM)
  */
-
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> // <-- Добавлено для strcasecmp
-#include "ini.h" // Подключаем заголовочный файл библиотеки inih
+#include <strings.h> // Для strcasecmp
+#include "ini.h"
 
-// Вспомогательная функция stricmp больше не нужна
+// Структура для передачи ID SVM в обработчик
+typedef struct {
+    AppConfig *config;
+    int target_svm_id;
+    char current_eth_section[32]; // "ethernet_svm0", "ethernet_svm1", ...
+    char current_svm_section[32]; // "svm_settings_0", "svm_settings_1", ...
+} ConfigParseCtx;
+
 
 // Обработчик для библиотеки inih
 static int config_handler(void* user, const char* section, const char* name,
                           const char* value) {
-    AppConfig* pconfig = (AppConfig*)user;
+    ConfigParseCtx* ctx = (ConfigParseCtx*)user;
+    AppConfig* pconfig = ctx->config;
 
-    #define MATCH(s, n) strcasecmp(section, s) == 0 && strcasecmp(name, n) == 0 // Используем strcasecmp для нечувствительности к регистру
+    #define MATCH(s, n) strcasecmp(section, s) == 0 && strcasecmp(name, n) == 0
     #define MATCH_STRNCPY(dest, src, size) \
         strncpy(dest, src, size - 1); \
         dest[size - 1] = '\0'
 
+    // --- Чтение общих настроек ---
     if (MATCH("communication", "interface_type")) {
         MATCH_STRNCPY(pconfig->interface_type, value, sizeof(pconfig->interface_type));
-    } else if (MATCH("ethernet", "target_ip")) {
-        MATCH_STRNCPY(pconfig->ethernet.target_ip, value, sizeof(pconfig->ethernet.target_ip));
-    } else if (MATCH("ethernet", "port")) {
-        pconfig->ethernet.port = (uint16_t)atoi(value); // Приведение к uint16_t
-    } else if (MATCH("ethernet", "base_port")) { // Если base_port в секции ethernet
-    pconfig->ethernet.base_port = atoi(value);
-	} else if (MATCH("svm_emulator", "num_svm_instances")) { // Новая секция для параметров эмулятора
-		pconfig->num_svm_instances = atoi(value);
-	} else if (MATCH("svm_emulator", "base_svm_lak")) {
-		pconfig->base_svm_lak = atoi(value); // LAK обычно в hex, но atoi ожидает dec. Можно использовать strtol(value, NULL, 0) для автоопределения или 16 для hex.
-	} else if (MATCH("serial", "device")) {
+    }
+    // --- Чтение настроек для КОНКРЕТНОГО SVM ID ---
+    else if (strcmp(section, ctx->current_eth_section) == 0) { // Сравниваем с нужной секцией ethernet_svmX
+         if (strcasecmp(name, "port") == 0) {
+             pconfig->ethernet.port = (uint16_t)atoi(value);
+         }
+         // Можно добавить IP, если SVM должен слушать на определенном IP
+         // else if (strcasecmp(name, "listen_ip") == 0) { ... }
+    } else if (strcmp(section, ctx->current_svm_section) == 0) { // Сравниваем с нужной секцией svm_settings_X
+         if (strcasecmp(name, "lak") == 0) {
+              // Читаем LAK (может быть hex или dec)
+              pconfig->svm_settings.lak = (LogicalAddress)strtol(value, NULL, 0);
+         }
+    }
+    // --- Чтение настроек для UVM (оставлено для совместимости) ---
+    else if (MATCH("ethernet_uvm_target", "target_ip")) {
+        MATCH_STRNCPY(pconfig->uvm_ethernet_target.target_ip, value, sizeof(pconfig->uvm_ethernet_target.target_ip));
+    } else if (MATCH("ethernet_uvm_target", "port")) {
+        pconfig->uvm_ethernet_target.port = (uint16_t)atoi(value);
+    } else if (MATCH("serial", "device")) {
         MATCH_STRNCPY(pconfig->serial.device, value, sizeof(pconfig->serial.device));
     } else if (MATCH("serial", "baud_rate")) {
         pconfig->serial.baud_rate = atoi(value);
-    } else if (MATCH("serial", "data_bits")) {
-        pconfig->serial.data_bits = atoi(value);
-    } else if (MATCH("serial", "parity")) {
-        MATCH_STRNCPY(pconfig->serial.parity, value, sizeof(pconfig->serial.parity));
-    } else if (MATCH("serial", "stop_bits")) {
-        pconfig->serial.stop_bits = atoi(value);
-    } else {
-        // Неизвестная секция/имя или пустая строка игнорируются
-        // fprintf(stderr, "Warning: Unknown config section/name: [%s] %s = %s\n", section, name, value);
-        return 1; // Возвращаем 1, чтобы парсер продолжил работу
+    } // ... (остальные параметры serial) ...
+    else {
+        // Игнорируем неизвестные секции/имена или секции для других SVM ID
+        return 1;
     }
     return 1; // Успех
 }
 
-// Функция загрузки конфигурации
-int load_config(const char *filename, AppConfig *config) {
-    // 1. Установить значения по умолчанию
+// Функция загрузки конфигурации для конкретного SVM ID
+int load_config(const char *filename, AppConfig *config, int svm_id) {
+    // 1. Установить значения по умолчанию (общие и для SVM 0)
     strcpy(config->interface_type, "ethernet");
-    strcpy(config->ethernet.target_ip, "127.0.0.1"); // Дефолт для UVM
+    // Дефолты для ethernet (будут переопределены для нужного ID)
     config->ethernet.port = 8080;
-	config->ethernet.base_port = 8080; // По умолчанию совпадает с port
-    config->num_svm_instances = 1;     // По умолчанию 1 экземпляр
-    config->base_svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL;
+    // strcpy(config->ethernet.listen_ip, "0.0.0.0"); // Пример
+    // Дефолты для настроек SVM (будут переопределены)
+    config->svm_settings.lak = 0x08;
+    // Дефолты для UVM target
+    strcpy(config->uvm_ethernet_target.target_ip, "127.0.0.1");
+    config->uvm_ethernet_target.port = 8080; // По умолчанию UVM подключается к порту SVM 0
+    // Дефолты для serial
     strcpy(config->serial.device, "/dev/ttyS0");
     config->serial.baud_rate = 115200;
     config->serial.data_bits = 8;
     strcpy(config->serial.parity, "none");
     config->serial.stop_bits = 1;
 
-    // 2. Запустить парсер
-    int parse_result = ini_parse(filename, config_handler, config);
+    // 2. Подготовить контекст для парсера
+    ConfigParseCtx ctx;
+    ctx.config = config;
+    ctx.target_svm_id = svm_id;
+    // Формируем имена секций для целевого SVM ID
+    snprintf(ctx.current_eth_section, sizeof(ctx.current_eth_section), "ethernet_svm%d", svm_id);
+    snprintf(ctx.current_svm_section, sizeof(ctx.current_svm_section), "svm_settings_%d", svm_id);
 
-    // 3. Обработать результат парсинга
+    // 3. Запустить парсер
+    int parse_result = ini_parse(filename, config_handler, &ctx);
+
+    // 4. Обработать результат парсинга
     if (parse_result < 0) {
         if (parse_result == -1) {
             fprintf(stderr, "Warning: Config file '%s' not found or cannot be opened. Using default values.\n", filename);
-            // Не считаем ошибкой, если файл не найден, используем дефолтные значения
-        } else if (parse_result > 0) {
-             fprintf(stderr, "Error: Parse error in config file '%s' on line %d.\n", filename, parse_result);
-             return parse_result; // Возвращаем номер строки с ошибкой
         } else {
-             fprintf(stderr, "Error: Unknown error parsing config file '%s'. Code: %d\n", filename, parse_result);
-             return -1; // Другая ошибка парсинга
+             fprintf(stderr, "Error: Config file '%s' error (Memory allocation failed? Code: %d).\n", filename, parse_result);
+             return -1; // Ошибка парсинга (не строка)
         }
+    } else if (parse_result > 0) {
+         fprintf(stderr, "Error: Parse error in config file '%s' on line %d.\n", filename, parse_result);
+         return parse_result; // Номер строки с ошибкой
     } else {
-        printf("Конфигурация из файла '%s' загружена.\n", filename);
+        printf("Configuration loaded successfully from '%s' for SVM ID %d.\n", filename, svm_id);
     }
 
+    // 5. Валидация прочитанных значений (особенно для целевого SVM)
+    if (config->ethernet.port == 0) {
+        fprintf(stderr, "Warning: Invalid ethernet port %d for SVM %d. Using default %d.\n", config->ethernet.port, svm_id, 8080 + svm_id);
+        config->ethernet.port = 8080 + svm_id; // Пример дефолта с ID
+    }
+    if (config->svm_settings.lak <= 0 || config->svm_settings.lak > 255) {
+         fprintf(stderr, "Warning: Invalid LAK %d for SVM %d. Using default %d.\n", config->svm_settings.lak, svm_id, 0x08 + svm_id);
+          config->svm_settings.lak = 0x08 + svm_id; // Пример дефолта с ID
+    }
+    // ... (другие валидации) ...
 
-	// Дополнительная валидация (пример)
-	if (config->ethernet.port == 0) { // Убрали проверку > 65535
-		fprintf(stderr, "Warning: Invalid ethernet port %d in config. Using default %d.\n", config->ethernet.port, 8080);
-		config->ethernet.port = 8080;
-	}
-    if (strcasecmp(config->interface_type, "ethernet") != 0 && strcasecmp(config->interface_type, "serial") != 0) { // Используем strcasecmp
-         fprintf(stderr, "Warning: Invalid interface_type '%s' in config. Using default 'ethernet'.\n", config->interface_type);
-         strcpy(config->interface_type, "ethernet");
-    }
-     if (strcasecmp(config->interface_type, "serial") == 0) {
-         if (strcasecmp(config->serial.parity, "none") != 0 &&
-             strcasecmp(config->serial.parity, "even") != 0 &&
-             strcasecmp(config->serial.parity, "odd") != 0) {
-             fprintf(stderr, "Warning: Invalid serial parity '%s'. Using default 'none'.\n", config->serial.parity);
-             strcpy(config->serial.parity, "none");
-         }
-         // Добавить валидацию для baud_rate, data_bits, stop_bits
-     }
-
-    // Валидация мульти-SVM параметров
-    if (config->num_svm_instances <= 0 || config->num_svm_instances > MAX_SVM_INSTANCES) {
-        fprintf(stderr, "Warning: Invalid num_svm_instances %d in config. Using default 1 (max %d).\n",
-                config->num_svm_instances, MAX_SVM_INSTANCES);
-        config->num_svm_instances = 1;
-    }
-    if (config->ethernet.base_port <= 0 || config->ethernet.base_port > 65535) {
-         fprintf(stderr, "Warning: Invalid ethernet base_port %d in config. Using default %d.\n", config->ethernet.base_port, 8080);
-         config->ethernet.base_port = 8080;
-    }
-    if (config->base_svm_lak <= 0 || config->base_svm_lak > 255) {
-         fprintf(stderr, "Warning: Invalid base_svm_lak %d in config. Using default %d.\n", config->base_svm_lak, LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL);
-          config->base_svm_lak = LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL;
-    }
-
-    printf("Итоговая конфигурация:\n");
+    // Вывод итоговой конфигурации (можно убрать или сделать опциональным)
+    printf("--- Effective Configuration for SVM ID %d ---\n", svm_id);
     printf("  interface_type = %s\n", config->interface_type);
-	printf("  [svm_emulator]\n");
-    printf("    num_svm_instances = %d\n", config->num_svm_instances);
-    printf("    base_svm_lak = 0x%02X\n", config->base_svm_lak);
-    if (strcasecmp(config->interface_type, "ethernet") == 0) {
-        printf("  [ethernet]\n");
-        printf("    target_ip = %s\n", config->ethernet.target_ip);
-        printf("    port = %d\n", config->ethernet.port);
-    } else {
-        printf("  [serial]\n");
-        printf("    device = %s\n", config->serial.device);
-        printf("    baud_rate = %d\n", config->serial.baud_rate);
-        printf("    data_bits = %d\n", config->serial.data_bits);
-        printf("    parity = %s\n", config->serial.parity);
-        printf("    stop_bits = %d\n", config->serial.stop_bits);
-    }
+    printf("  [ethernet_svm%d]\n", svm_id);
+    printf("    port = %d\n", config->ethernet.port);
+    printf("  [svm_settings_%d]\n", svm_id);
+    printf("    lak = 0x%02X\n", config->svm_settings.lak);
+    printf("-------------------------------------------\n");
 
-
-    return 0; // Успех (даже если файл не найден и используются дефолты)
+    return 0; // Успех
 }
