@@ -235,42 +235,91 @@ int main(int argc, char *argv[]) {
         if (should_send) {
              request.target_svm_id = i;
              if (mode == MODE_DR) {
-                 // Принять параметры СДР
+                 printf("UVM Main (SVM %d): Sending DR parameters...\n", i);
+                 // 1. Принять параметры СДР
                  request.message = create_prinyat_parametry_sdr_message(current_lak, msg_num_param1++);
-                 PrinyatParametrySdrBodyBase sdr_body_base = {0}; // Используем БАЗОВУЮ структуру
-                 sdr_body_base.pp_nl=1; sdr_body_base.brl=7; sdr_body_base.kdec=2; sdr_body_base.yo=1; /*...*/
-                 sdr_body_base.q = htons(1500); sdr_body_base.sigmaybm = htons(2500); sdr_body_base.nfft=htons(128); sdr_body_base.mrr = htons(0); // MRR=0, т.к. массив не передаем
+                 PrinyatParametrySdrBodyBase sdr_body_base = {0};
+                 // TODO: Заполнить sdr_body_base реальными или тестовыми данными для DR
+                 sdr_body_base.pp_nl = (uint8_t)mode | 0x01; // Пример
+                 sdr_body_base.q = htons(1500); // Пример
                  memcpy(request.message.body, &sdr_body_base, sizeof(PrinyatParametrySdrBodyBase));
-                 request.message.header.body_length = htons(sizeof(PrinyatParametrySdrBodyBase)); // Устанавливаем длину БАЗОВОГО тела
+                 request.message.header.body_length = htons(sizeof(PrinyatParametrySdrBodyBase));
                  send_uvm_request(&request);
 
-                 // Принять параметры ЦДР
+                 // 2. Принять параметры ЦДР
                  request.message = create_prinyat_parametry_tsd_message(current_lak, msg_num_param2++);
-                 PrinyatParametryTsdBodyBase tsd_body_base = {0}; // Используем БАЗОВУЮ структуру
-                 tsd_body_base.nin=htons(1); tsd_body_base.nout=htons(1); tsd_body_base.mrn=htons(64); tsd_body_base.shmr=10; tsd_body_base.nar=htons(32);
+                 PrinyatParametryTsdBodyBase tsd_body_base = {0};
+                  // TODO: Заполнить tsd_body_base реальными или тестовыми данными для DR
+                 tsd_body_base.nin = htons(100); // Пример
+                 tsd_body_base.nout = htons(100); // Пример
                  memcpy(request.message.body, &tsd_body_base, sizeof(PrinyatParametryTsdBodyBase));
-                 request.message.header.body_length = htons(sizeof(PrinyatParametryTsdBodyBase)); // Устанавливаем длину БАЗОВОГО тела
+                 request.message.header.body_length = htons(sizeof(PrinyatParametryTsdBodyBase));
                  send_uvm_request(&request);
 
-             } else if (mode == MODE_OR || mode == MODE_OR1 || mode == MODE_VR) {
-                 // Принять параметры СО
+             } else if (mode == MODE_OR || mode == MODE_OR1) {
+                 printf("UVM Main (SVM %d): Sending OR/OR1 parameters...\n", i);
+                 // 1. Принять параметры СО
                  request.message = create_prinyat_parametry_so_message(current_lak, msg_num_param1++);
                  PrinyatParametrySoBody so_body = {0};
-                 so_body.pp = mode; so_body.brl = 7; so_body.q0=3; /*...*/
-                 so_body.q=htons(1500); so_body.knk=htons(300); so_body.knk_or1=htons(350); /*...*/
+                 // TODO: Заполнить so_body реальными или тестовыми данными для OR/OR1
+                 so_body.pp = mode;
+                 so_body.knk = htons(400); // Другой KNK для примера
                  memcpy(request.message.body, &so_body, sizeof(PrinyatParametrySoBody));
                  request.message.header.body_length = htons(sizeof(PrinyatParametrySoBody));
                  send_uvm_request(&request);
 
-                 // Принять параметры 3ЦО
+                 // 2. Принять параметры 3ЦО
                  request.message = create_prinyat_parametry_3tso_message(current_lak, msg_num_param2++);
                  PrinyatParametry3TsoBody tso_body = {0};
-                 tso_body.Ncadr=htons(4); tso_body.Xnum=128; tso_body.Q1=htons(500); /*...*/
+                 // TODO: Заполнить tso_body реальными или тестовыми данными для OR/OR1
+                 tso_body.Ncadr = htons(1024); // Пример
                  memcpy(request.message.body, &tso_body, sizeof(PrinyatParametry3TsoBody));
                  request.message.header.body_length = htons(sizeof(PrinyatParametry3TsoBody));
                  send_uvm_request(&request);
+
+                 // 3. Принять TIME_REF_RANGE (только для OR/OR1)
+                 request.message = create_prinyat_time_ref_range_message(current_lak, msg_num_param1++); // Используем счетчик param1 или новый
+                 PrinyatTimeRefRangeBody time_ref_body = {0};
+                 // TODO: Заполнить time_ref_body
+                 memcpy(request.message.body, &time_ref_body, sizeof(PrinyatTimeRefRangeBody));
+                 request.message.header.body_length = htons(sizeof(PrinyatTimeRefRangeBody));
+                 send_uvm_request(&request);
+
+                 // 4. Принять Reper (только для OR/OR1)
+                 request.message = create_prinyat_reper_message(current_lak, msg_num_param2++); // Используем счетчик param2 или новый
+                 PrinyatReperBody reper_body = {0};
+                 // TODO: Заполнить reper_body
+                 reper_body.NTSO1 = htons(1); reper_body.ReperR1 = htons(100); /* ... */
+                 memcpy(request.message.body, &reper_body, sizeof(PrinyatReperBody));
+                 request.message.header.body_length = htons(sizeof(PrinyatReperBody));
+                 send_uvm_request(&request);
+
+             } else if (mode == MODE_VR) {
+                 printf("UVM Main (SVM %d): Sending VR parameters...\n", i);
+                 // 1. Принять параметры СО
+                 request.message = create_prinyat_parametry_so_message(current_lak, msg_num_param1++);
+                 PrinyatParametrySoBody so_body = {0};
+                 // TODO: Заполнить so_body реальными или тестовыми данными для VR
+                 so_body.pp = mode;
+                 so_body.knk = htons(500); // Другой KNK
+                 memcpy(request.message.body, &so_body, sizeof(PrinyatParametrySoBody));
+                 request.message.header.body_length = htons(sizeof(PrinyatParametrySoBody));
+                 send_uvm_request(&request);
+
+                 // 2. Принять параметры 3ЦО
+                 request.message = create_prinyat_parametry_3tso_message(current_lak, msg_num_param2++);
+                 PrinyatParametry3TsoBody tso_body = {0};
+                 // TODO: Заполнить tso_body реальными или тестовыми данными для VR
+                 tso_body.Ncadr = htons(512); // Другое значение
+                 memcpy(request.message.body, &tso_body, sizeof(PrinyatParametry3TsoBody));
+                 request.message.header.body_length = htons(sizeof(PrinyatParametry3TsoBody));
+                 send_uvm_request(&request);
+
+                 // Для VR не нужны TIME_REF и REPER
              }
-             // Навигационные данные для всех режимов
+
+             // Навигационные данные для всех режимов (отправляются после специфичных)
+             printf("UVM Main (SVM %d): Sending NAV data...\n", i);
              request.message = create_navigatsionnye_dannye_message(current_lak, msg_num_nav++);
              NavigatsionnyeDannyeBody nav_body = {0}; nav_body.mnd[0]=i;
              memcpy(request.message.body, &nav_body, sizeof(NavigatsionnyeDannyeBody));
