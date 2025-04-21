@@ -15,12 +15,28 @@
 // Предварительное объявление очереди ответов
 struct ThreadSafeUvmRespQueue;
 
-// Типы запросов от Main к Sender'у UVM
 typedef enum {
-    UVM_REQ_SEND_MESSAGE,   // Просто отправить сообщение
-    UVM_REQ_CONNECT,        // Установить соединение (может быть не нужно, main сам соединяется)
-    UVM_REQ_DISCONNECT,     // Разорвать соединение
-    UVM_REQ_SHUTDOWN        // Сигнал Sender'у завершиться
+    UVM_REQ_NONE = 0,         // Добавим значение для "нет запроса" или неизвестного
+    UVM_REQ_SEND_MESSAGE,   // Просто отправить сообщение (уже было)
+
+    // --- Добавляем константы для конкретных команд ---
+    UVM_REQ_INIT_CHANNEL,
+    UVM_REQ_PROVESTI_KONTROL,
+    UVM_REQ_VYDAT_REZULTATY,
+    UVM_REQ_VYDAT_SOSTOYANIE,
+    UVM_REQ_PRIYAT_PARAM_SO,
+    UVM_REQ_PRIYAT_TIME_REF,
+    UVM_REQ_PRIYAT_REPER,
+    UVM_REQ_PRIYAT_PARAM_SDR,
+    UVM_REQ_PRIYAT_PARAM_3TSO,
+    UVM_REQ_PRIYAT_REF_AZIMUTH,
+    UVM_REQ_PRIYAT_PARAM_TSD,
+    UVM_REQ_PRIYAT_NAV_DANNYE,
+    // --- Конец добавленных констант ---
+
+    UVM_REQ_CONNECT,        // Установить соединение (уже было)
+    UVM_REQ_DISCONNECT,     // Разорвать соединение (уже было)
+    UVM_REQ_SHUTDOWN        // Сигнал Sender'у завершиться (уже было)
 } UvmRequestType;
 
 // Структура запроса к Sender'у UVM
