@@ -16,6 +16,7 @@ static int config_handler(void* user, const char* section, const char* name,
                           const char* value) {
     AppConfig* pconfig = (AppConfig*)user;
     int svm_id = -1;
+    printf("DEBUG_CONFIG: Section=[%s], Name=[%s], Value=[%s]\n", section, name, value); // <-- Добавь этот printf
 
     #define MATCH(s, n) strcasecmp(section, s) == 0 && strcasecmp(name, n) == 0
     #define MATCH_STRNCPY(dest, src, size) \
@@ -23,23 +24,29 @@ static int config_handler(void* user, const char* section, const char* name,
         dest[size - 1] = '\0'
 
     // Пытаемся распознать секции для SVM
-    if (sscanf(section, "ethernet_svm%d", &svm_id) == 1) {
+    int sscanf_res_eth = sscanf(section, "ethernet_svm%d", &svm_id); // <-- Сохраним результат sscanf
+    if (sscanf_res_eth == 1) {
+        printf("DEBUG_CONFIG: Matched ethernet_svm%d\n", svm_id); // <-- Добавь этот printf
         if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
              if (strcasecmp(name, "port") == 0) {
-                 // Сохраняем в массив svm_ethernet
                  pconfig->svm_ethernet[svm_id].port = (uint16_t)atoi(value);
                  pconfig->svm_config_loaded[svm_id] = true;
+                 printf("DEBUG_CONFIG: Set port for SVM %d to %s\n", svm_id, value); // <-- Добавь этот printf
              }
              return 1;
         }
-    } else if (sscanf(section, "svm_settings_%d", &svm_id) == 1) {
-        if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
-             if (strcasecmp(name, "lak") == 0) {
-                  // Сохраняем в массив svm_settings
-                  pconfig->svm_settings[svm_id].lak = (LogicalAddress)strtol(value, NULL, 0);
-                  pconfig->svm_config_loaded[svm_id] = true;
-             }
-             return 1;
+    } else {
+        int sscanf_res_set = sscanf(section, "svm_settings_%d", &svm_id); // <-- Сохраним результат sscanf
+         if (sscanf_res_set == 1) {
+             printf("DEBUG_CONFIG: Matched svm_settings_%d\n", svm_id); // <-- Добавь этот printf
+            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                 if (strcasecmp(name, "lak") == 0) {
+                      pconfig->svm_settings[svm_id].lak = (LogicalAddress)strtol(value, NULL, 0);
+                      pconfig->svm_config_loaded[svm_id] = true;
+                      printf("DEBUG_CONFIG: Set LAK for SVM %d to %s\n", svm_id, value); // <-- Добавь этот printf
+                 }
+                 return 1;
+            }
         }
     }
 
