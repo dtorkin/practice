@@ -4,6 +4,7 @@
  * Описание:
  * Вспомогательные функции для модуля UVM.
  */
+#include "uvm_utils.h" // Для UvmRequestType
 #include "uvm_types.h" // Для UvmRequestType
 #include <stdio.h>     // Для NULL
 
