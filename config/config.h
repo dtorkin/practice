@@ -1,58 +1,46 @@
 /*
  * config/config.h
- * Описание: Определяет структуру для хранения конфигурации приложения.
- * (Модифицировано для загрузки ВСЕХ настроек SVM)
+ *
+ * Описание:
+ * Определяет структуру для хранения конфигурации приложения
+ * и объявляет функцию для загрузки конфигурации из файла.
  */
+
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <stdbool.h>
-#include "../io/io_interface.h"
+// Включаем определения интерфейсов, где теперь определены EthernetConfig и SerialConfig
+#include "../io/io_interface.h" // Путь может быть ../io/io_interface.h в зависимости от структуры include
 #include "../protocol/protocol_defs.h"
-
-// Максимальное количество SVM, чьи настройки можно хранить
-#define MAX_SVM_CONFIGS 4 // Должно быть >= MAX_SVM_INSTANCES
-
-// Настройки, специфичные для одного SVM
-typedef struct {
-    LogicalAddress lak;
-    // Другие специфичные настройки SVM можно добавить сюда
-} SvmInstanceSettings;
-
-// Настройки Ethernet для одного SVM
-typedef struct {
-    uint16_t port;
-    // char listen_ip[INET_ADDRSTRLEN]; // Если нужно
-} SvmEthernetConfig;
-
+#include "../svm/svm_types.h"
 
 // Основная структура конфигурации
 typedef struct {
-    // Общие настройки
-    char interface_type[16];
+    // Секция [communication]
+    char interface_type[16]; // "ethernet" или "serial"
 
-    // --- Настройки для SVM ---
-    // Массивы для хранения настроек до MAX_SVM_CONFIGS экземпляров
-    SvmEthernetConfig svm_ethernet[MAX_SVM_CONFIGS];
-    SvmInstanceSettings svm_settings[MAX_SVM_CONFIGS];
-    // Можно добавить флаг, прочитана ли конфигурация для данного ID
-    bool svm_config_loaded[MAX_SVM_CONFIGS];
-    int num_svm_configs_found; // Сколько секций SVM найдено в файле
+    // Секция [ethernet]
+    EthernetConfig ethernet; // Тип теперь известен из io_interface.h
 
-    // --- Настройки для UVM ---
-    EthernetConfig uvm_ethernet_target; // Параметры цели для UVM
-    SerialConfig serial;                // Параметры Serial
+    // Секция [serial]
+    SerialConfig serial;     // Тип теперь известен из io_interface.h
+
+    int num_svm_instances; // Количество эмулируемых SVM
+    int base_svm_lak;      // Базовый логический адрес для первого 
+    // Можно добавить другие секции и параметры по мере необходимости
 
 } AppConfig;
 
 /**
- * @brief Загружает ВСЮ конфигурацию из INI-файла.
+ * @brief Загружает конфигурацию из INI-файла.
+ *
  * Заполняет структуру AppConfig значениями из файла.
  * Устанавливает значения по умолчанию, если файл или параметры отсутствуют.
+ *
  * @param filename Имя конфигурационного файла.
  * @param config Указатель на структуру AppConfig для заполнения.
- * @return 0 в случае успеха, -1 если ошибка файла, >0 номер строки с ошибкой парсинга.
+ * @return 0 в случае успеха, -1 если файл не найден, >0 если ошибка парсинга (код ошибки inih).
  */
-int load_config(const char *filename, AppConfig *config); // <-- Сигнатура с 2 аргументами
+int load_config(const char *filename, AppConfig *config);
 
 #endif // CONFIG_H

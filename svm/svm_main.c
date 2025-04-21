@@ -1,9 +1,10 @@
 /*
  * svm/svm_main.c
- * Описание: Основной файл SVM: инициализация, создание потоков,
- * управление жизненным циклом для ОДНОГО экземпляра SVM.
- * Параметры (порт, LAK) берутся из config.ini на основе ID.
+ * Описание: Основной файл SVM: инициализация, управление МНОЖЕСТВОМ экземпляров СВ-М,
+ * создание потоков (ОБЩИЕ Timer/Sender, ПЕРСОНАЛЬНЫЕ Listener/Receiver/Processor),
+ * управление их жизненным циклом. Использует подход "1 поток accept на порт".
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,227 +24,361 @@
 #include "../io/io_common.h"
 #include "../io/io_interface.h"
 #include "../config/config.h"
-#include "../utils/ts_queue.h" // Обычная очередь для Message
+#include "../utils/ts_queued_msg_queue.h" // Очередь для QueuedMessage
 #include "svm_handlers.h"
 #include "svm_timers.h"
+#include "svm_types.h"
 
-// --- Глобальные переменные (одно-экземплярная модель) ---
-ThreadSafeQueue *svm_incoming_queue = NULL;
-ThreadSafeQueue *svm_outgoing_queue = NULL;
-IOInterface *io_svm = NULL;
-int global_client_handle = -1;
-int listen_socket_fd = -1; // Слушающий сокет
+// --- Глобальные переменные ---
+SvmInstance svm_instances[MAX_SVM_CONFIGS]; // Используем MAX_SVM_CONFIGS из config.h
+ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;
+// IOInterface *io_svm = NULL; // IO интерфейс теперь создается для каждого listener'а
+pthread_mutex_t svm_instances_mutex; // Мьютекс для ЗАЩИТЫ МАССИВА (например, при поиске)
+// int listen_socket_fd = -1; // Больше не один слушающий сокет
+int listen_sockets[MAX_SVM_CONFIGS]; // Массив слушающих сокетов
+pthread_t listener_threads[MAX_SVM_CONFIGS]; // Массив потоков-слушателей
+
 volatile bool keep_running = true;
-extern LogicalAddress svm_logical_address; // LAK этого экземпляра (определен в svm_handlers.c)
 
 // --- Прототипы потоков ---
 extern void* receiver_thread_func(void* arg);
 extern void* processor_thread_func(void* arg);
 extern void* sender_thread_func(void* arg);
 extern void* timer_thread_func(void* arg);
+void* listener_thread_func(void* arg); // Новый поток-слушатель
 
 // --- Обработчик сигналов ---
 void handle_shutdown_signal(int sig) {
-    const char msg_int[] = "\nSVM: Received SIGINT. Shutting down...\n";
-    const char msg_term[] = "\nSVM: Received SIGTERM. Shutting down...\n";
-    const char *msg_ptr = (sig == SIGINT) ? msg_int : msg_term;
-    ssize_t written __attribute__((unused)) = write(STDOUT_FILENO, msg_ptr, strlen(msg_ptr));
+    (void)sig;
+    const char msg[] = "\nSVM: Received shutdown signal. Shutting down all listeners and instances...\n";
+    ssize_t written __attribute__((unused)) = write(STDOUT_FILENO, msg, sizeof(msg) - 1);
     keep_running = false;
-    // Закрываем слушающий сокет, чтобы разбудить accept
-    if (listen_socket_fd >= 0) {
-        int fd = listen_socket_fd;
-        listen_socket_fd = -1;
-        shutdown(fd, SHUT_RDWR);
-        close(fd);
+
+    // Закрываем ВСЕ слушающие сокеты, чтобы разбудить потоки listener_thread_func
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        int fd = listen_sockets[i];
+        if (fd >= 0) {
+            listen_sockets[i] = -1; // Предотвращаем повторное закрытие
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
+        }
     }
-    // Закрываем клиентский сокет, чтобы разбудить receiver/sender
-    if (global_client_handle >= 0) {
-        int fd = global_client_handle;
-        global_client_handle = -1;
-        shutdown(fd, SHUT_RDWR);
-        // close(fd); // Закроем в main после join
-    }
+    // Также нужно разбудить Processor'ы и Sender'а
+    if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue);
+    // Разбудить Processor'ы сложнее, т.к. нужно пройти по всем активным instance->incoming_queue
+    // Это сделаем в основном потоке при завершении
+    stop_timer_thread_signal(); // Сигналим таймеру
 }
 
-int main(int argc, char *argv[]) {
-    AppConfig config;
-    pthread_t receiver_tid = 0, processor_tid = 0, sender_tid = 0, timer_tid = 0;
-    bool threads_started = false;
-    int svm_id = 0; // ID экземпляра по умолчанию
+// --- Функция инициализации экземпляра (без изменений) ---
+void initialize_svm_instance(SvmInstance *instance, int id) { /* ... как раньше ... */ }
 
-    // --- Парсинг аргумента командной строки (ID экземпляра) ---
-    if (argc > 1) {
-        svm_id = atoi(argv[1]);
-        if (svm_id < 0 || svm_id >= 4) { // Предполагаем максимум 4 экземпляра для конфига
-            fprintf(stderr, "Usage: %s [svm_id (0-3)]\n", argv[0]);
-            exit(EXIT_FAILURE);
-        }
-        printf("SVM Instance ID: %d\n", svm_id);
-    } else {
-        printf("SVM Instance ID: %d (default)\n", svm_id);
+
+// --- Поток-слушатель для одного порта/экземпляра ---
+typedef struct {
+    int svm_id;
+    int listen_fd;
+} ListenerArgs;
+
+void* listener_thread_func(void* arg) {
+    ListenerArgs *args = (ListenerArgs*)arg;
+    int svm_id = args->svm_id;
+    int lfd = args->listen_fd;
+    free(args); // Освобождаем память из main
+
+    if (lfd < 0) {
+        fprintf(stderr, "Listener (SVM %d): Invalid listen socket provided.\n", svm_id);
+        return NULL;
     }
 
-    // --- Инициализация ---
-    if (init_svm_counters_mutex_and_cond() != 0) { exit(EXIT_FAILURE); }
+    SvmInstance *instance = &svm_instances[svm_id]; // Указатель на наш экземпляр
+    printf("Listener thread started for SVM ID %d (LAK 0x%02X, Port %d, Listen FD %d)\n",
+           svm_id, instance->assigned_lak, config.svm_ethernet[svm_id].port, lfd);
+
+
+    while (keep_running) {
+        char client_ip_str[INET_ADDRSTRLEN];
+        uint16_t client_port_num;
+        struct sockaddr_in client_addr; // Нужен для accept
+        socklen_t client_len = sizeof(client_addr);
+        int client_handle = -1;
+
+        printf("Listener (SVM %d): Waiting for connection on port %d...\n", svm_id, config.svm_ethernet[svm_id].port);
+        client_handle = accept(lfd, (struct sockaddr *)&client_addr, &client_len);
+
+        if (client_handle < 0) {
+            if (!keep_running || errno == EBADF) { // Прервано сигналом или сокет закрыт
+                printf("Listener (SVM %d): Accept loop interrupted or socket closed.\n", svm_id);
+            } else if (errno == EINTR) {
+                printf("Listener (SVM %d): accept() interrupted, retrying...\n", svm_id);
+                continue;
+            } else {
+                 if (keep_running) perror("Listener accept failed");
+            }
+            break; // Выходим из цикла при ошибке или завершении
+        }
+
+        // Соединение принято!
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip_str, sizeof(client_ip_str));
+        client_port_num = ntohs(client_addr.sin_port);
+        printf("Listener (SVM %d): Accepted connection from %s:%u (Client FD %d)\n",
+               svm_id, client_ip_str, client_port_num, client_handle);
+
+        // Захватываем мьютекс экземпляра для его настройки
+        pthread_mutex_lock(&instance->instance_mutex);
+        if (instance->is_active) {
+             pthread_mutex_unlock(&instance->instance_mutex);
+             fprintf(stderr, "Listener (SVM %d): Instance is already active! Rejecting new connection.\n", svm_id);
+             close(client_handle);
+             continue; // Ждем следующего соединения (хотя это странная ситуация)
+        }
+
+        // Настраиваем экземпляр
+        instance->client_handle = client_handle;
+        // instance->io_handle теперь не нужен глобально или в instance, т.к. функции send/recv вызываются с хэндлом
+        instance->current_state = STATE_NOT_INITIALIZED;
+        instance->message_counter = 0;
+        instance->bcb_counter = 0; // Сброс счетчиков
+        instance->link_up_changes_counter = 0;
+        instance->link_up_low_time_us100 = 0;
+        instance->sign_det_changes_counter = 0;
+        instance->link_status_timer_counter = 0;
+
+        // Создаем входящую очередь
+        instance->incoming_queue = qmq_create(100);
+        if (!instance->incoming_queue) {
+             pthread_mutex_unlock(&instance->instance_mutex);
+             fprintf(stderr, "Listener (SVM %d): Failed to create incoming queue. Rejecting.\n", svm_id);
+             close(client_handle);
+             continue;
+        }
+
+        // Запускаем рабочие потоки
+        bool receiver_ok = false, processor_ok = false;
+        if (pthread_create(&instance->receiver_tid, NULL, receiver_thread_func, instance) == 0) {
+            receiver_ok = true;
+            if (pthread_create(&instance->processor_tid, NULL, processor_thread_func, instance) == 0) {
+                processor_ok = true;
+            } else {
+                perror("Listener: Failed to create processor thread");
+                pthread_cancel(instance->receiver_tid); // Отменяем ресивер
+                pthread_join(instance->receiver_tid, NULL);
+            }
+        } else {
+             perror("Listener: Failed to create receiver thread");
+        }
+
+        if (receiver_ok && processor_ok) {
+            instance->is_active = true; // Помечаем активным
+            printf("Listener (SVM %d): Instance activated. Worker threads started.\n", svm_id);
+            pthread_mutex_unlock(&instance->instance_mutex); // Отпускаем мьютекс экземпляра
+
+            // --- Ожидание завершения рабочих потоков ---
+            printf("Listener (SVM %d): Waiting for worker threads to finish...\n", svm_id);
+            pthread_join(instance->receiver_tid, NULL);
+            printf("Listener (SVM %d): Receiver thread joined.\n", svm_id);
+            pthread_join(instance->processor_tid, NULL);
+            printf("Listener (SVM %d): Processor thread joined.\n", svm_id);
+
+            // --- Очистка после завершения клиента ---
+             printf("Listener (SVM %d): Worker threads finished. Cleaning up instance...\n", svm_id);
+             pthread_mutex_lock(&instance->instance_mutex);
+             if (instance->client_handle >= 0) {
+                 close(instance->client_handle); // Закрываем сокет клиента
+                 instance->client_handle = -1;
+             }
+             if (instance->incoming_queue) {
+                 qmq_destroy(instance->incoming_queue);
+                 instance->incoming_queue = NULL;
+             }
+             instance->is_active = false;
+             instance->receiver_tid = 0;
+             instance->processor_tid = 0;
+             pthread_mutex_unlock(&instance->instance_mutex);
+             printf("Listener (SVM %d): Instance deactivated. Ready for new connection.\n", svm_id);
+
+        } else {
+            // Не удалось запустить потоки
+            pthread_mutex_unlock(&instance->instance_mutex);
+            fprintf(stderr, "Listener (SVM %d): Failed to start worker threads. Rejecting.\n", svm_id);
+            if(instance->incoming_queue) qmq_destroy(instance->incoming_queue);
+            instance->incoming_queue = NULL;
+            close(client_handle);
+            continue; // Возвращаемся к accept
+        }
+
+    } // end while(keep_running)
+
+    printf("Listener thread for SVM ID %d finished.\n", svm_id);
+    // Закрываем слушающий сокет при выходе (если он еще не закрыт)
+    if (lfd >= 0) {
+         close(lfd);
+         // Сбрасываем глобальный дескриптор (нужна защита мьютексом, если main может его использовать)
+         // pthread_mutex_lock(&some_global_mutex); listen_sockets[svm_id] = -1; pthread_mutex_unlock(..);
+    }
+    return NULL;
+}
+
+
+// Основная функция
+int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused))) {
+    // int svm_id = 0; // svm_id больше не нужен здесь
+
+    pthread_t timer_tid = 0, sender_tid = 0;
+    bool threads_started = false;
+
+    printf("SVM Multi-Port Server starting...\n");
+
+    // Инициализация мьютекса массива и таймера
+    if (pthread_mutex_init(&svm_instances_mutex, NULL) != 0) { /*...*/ exit(EXIT_FAILURE); }
+    if (init_svm_timer_sync() != 0) { /*...*/ exit(EXIT_FAILURE); }
     init_message_handlers();
 
-	printf("SVM (ID %d): Loading configuration...\n", svm_id);
-	// Загружаем ВСЮ конфигурацию
-	if (load_config("config.ini", &config) != 0) {
-		destroy_svm_counters_mutex_and_cond();
-		exit(EXIT_FAILURE);
-	}
-	// Проверяем, был ли конфиг для нашего ID загружен
-	if (svm_id < 0 || svm_id >= MAX_SVM_CONFIGS || !config.svm_config_loaded[svm_id]) {
-		fprintf(stderr, "SVM (ID %d): Error: Configuration section not found or invalid ID.\n", svm_id);
-		destroy_svm_counters_mutex_and_cond();
-		exit(EXIT_FAILURE);
-	}
-	// Используем параметры из нужного индекса массива
-	svm_logical_address = config.svm_settings[svm_id].lak;
-	uint16_t listen_port = config.svm_ethernet[svm_id].port;
+    // Инициализация всех экземпляров и слушающих сокетов
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        initialize_svm_instance(&svm_instances[i], i);
+        listen_sockets[i] = -1; // Инициализация массива дескрипторов
+        listener_threads[i] = 0;
+    }
 
-    // Создание IO интерфейса
-    printf("SVM: Creating IO interface type '%s' for port %u, LAK 0x%02X...\n",
-           config.interface_type, listen_port, svm_logical_address);
-	if (strcasecmp(config.interface_type, "ethernet") == 0) {
-		// Создаем конфигурацию ТОЛЬКО с портом, который нужен для bind/listen
-		EthernetConfig listen_config;
-		memset(&listen_config, 0, sizeof(listen_config)); // Обнуляем
-		listen_config.port = listen_port; // Устанавливаем нужный порт
-		// target_ip оставляем пустым или null, create_ethernet_interface
-		// должен сам использовать INADDR_ANY для listen, если target_ip не указан или пуст.
-		// УБЕДИТЕСЬ, ЧТО io_ethernet.c -> ethernet_listen использует INADDR_ANY при bind, если IP не задан.
-		io_svm = create_ethernet_interface(&listen_config);
-	} else {
-		fprintf(stderr, "SVM: Only ethernet interface type is supported.\n");
-		destroy_svm_counters_mutex_and_cond();
-		exit(EXIT_FAILURE);
-	}
-    if (!io_svm) { /* ... */ destroy_svm_counters_mutex_and_cond(); exit(EXIT_FAILURE); }
+    // Загрузка конфигурации (читает все секции)
+    printf("SVM: Loading configuration...\n");
+    if (load_config("config.ini", &config) != 0) {
+        goto cleanup_sync;
+    }
+    int num_svms_to_run = config.num_svm_configs_found;
+    if (num_svms_to_run == 0) { /*...*/ goto cleanup_sync; }
+    printf("SVM: Will attempt to start %d instances based on config.\n", num_svms_to_run);
 
-    // Создание очередей
-    svm_incoming_queue = queue_create(100);
-    svm_outgoing_queue = queue_create(100);
-    if (!svm_incoming_queue || !svm_outgoing_queue) { /* ... */ goto cleanup_io; }
+
+    // Создание общей исходящей очереди
+    svm_outgoing_queue = qmq_create(100 * num_svms_to_run);
+    if (!svm_outgoing_queue) { /*...*/ goto cleanup_sync; }
 
     // Установка сигналов
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_shutdown_signal;
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
+    signal(SIGINT, handle_shutdown_signal);
+    signal(SIGTERM, handle_shutdown_signal);
 
-    // --- Сетевая часть ---
-    if (io_svm->type == IO_TYPE_ETHERNET) {
-        printf("SVM (LAK 0x%02X): Starting listener on port %u...\n", svm_logical_address, listen_port);
-        listen_socket_fd = io_svm->listen(io_svm); // listen использует порт из config.ethernet
-        if (listen_socket_fd < 0) { /* ... */ goto cleanup_queues; }
-        printf("SVM (LAK 0x%02X) listening (handle: %d). Waiting for 1 UVM connection...\n", svm_logical_address, listen_socket_fd);
+    // --- Создание и запуск потоков-слушателей ---
+    int listeners_started = 0;
+    for (int i = 0; i < num_svms_to_run; ++i) {
+        if (!config.svm_config_loaded[i]) continue; // Пропускаем, если конфига нет
 
-        while (keep_running) { // Цикл ожидания ОДНОГО соединения
-            char client_ip_str[INET_ADDRSTRLEN];
-            uint16_t client_port_num;
-            int lfd = listen_socket_fd;
-            if (lfd < 0) break; // Сокет закрыт сигналом
+        // Устанавливаем LAK для экземпляра ДО запуска потока
+        svm_instances[i].assigned_lak = config.svm_settings[i].lak;
 
-            global_client_handle = io_svm->accept(io_svm, client_ip_str, sizeof(client_ip_str), &client_port_num);
-
-            if (global_client_handle >= 0) {
-                printf("SVM (LAK 0x%02X) accepted connection from %s:%u (client handle: %d)\n",
-                       svm_logical_address, client_ip_str, client_port_num, global_client_handle);
-                // Закрываем слушающий сокет, так как мы обрабатываем только одного клиента
-                if (listen_socket_fd >= 0) {
-                    io_svm->disconnect(io_svm, listen_socket_fd);
-                    listen_socket_fd = -1;
-                }
-                break; // Выходим из цикла ожидания соединения
-            } else {
-                if (!keep_running || errno == EBADF) {
-                    printf("SVM: Listener interrupted or socket closed while waiting for connection.\n");
-                } else if (errno == EINTR) {
-                    printf("SVM: accept() interrupted, retrying...\n");
-                    continue;
-                } else {
-                    if (keep_running) perror("SVM: Error accepting connection");
-                }
-                goto cleanup_queues; // Ошибка или завершение до соединения
-            }
-        } // end while accept
-
-        // Проверяем, установили ли соединение перед запуском потоков
-        if (global_client_handle < 0) {
-             if (keep_running) fprintf(stderr,"SVM: Failed to accept connection.\n");
-             goto cleanup_queues;
+        // Создаем IO интерфейс ТОЛЬКО для получения порта из конфига
+        // Временное решение: создаем полный интерфейс, чтобы вызвать listen
+        EthernetConfig listen_config;
+        memset(&listen_config, 0, sizeof(listen_config));
+        listen_config.port = config.svm_ethernet[i].port;
+        IOInterface* temp_io = create_ethernet_interface(&listen_config);
+        if (!temp_io) {
+             fprintf(stderr, "SVM: Failed to create temp IO interface for instance %d\n", i);
+             continue; // Пропускаем этот экземпляр
         }
 
-    } else { /* ... Serial not supported ... */ }
+        // Начинаем слушать порт
+        listen_sockets[i] = temp_io->listen(temp_io);
+        temp_io->destroy(temp_io); // Уничтожаем временный интерфейс
 
-    // --- Запуск потоков ---
-    printf("SVM (LAK 0x%02X): Starting worker threads...\n", svm_logical_address);
-    if (pthread_create(&timer_tid, NULL, timer_thread_func, NULL) != 0) { /*...*/ goto cleanup_connection; }
-    if (pthread_create(&receiver_tid, NULL, receiver_thread_func, NULL) != 0) { /*...*/ goto cleanup_timer; }
-    if (pthread_create(&processor_tid, NULL, processor_thread_func, NULL) != 0) { /*...*/ goto cleanup_receiver; }
-    if (pthread_create(&sender_tid, NULL, sender_thread_func, NULL) != 0) { /*...*/ goto cleanup_processor; }
+        if (listen_sockets[i] < 0) {
+            fprintf(stderr, "SVM: Failed to listen on port %d for instance %d. Skipping.\n",
+                    config.svm_ethernet[i].port, i);
+            continue; // Пропускаем этот экземпляр
+        }
+
+        // Готовим аргументы для потока-слушателя
+        ListenerArgs *args = malloc(sizeof(ListenerArgs));
+        if (!args) {
+             perror("SVM: Failed to allocate listener args");
+             close(listen_sockets[i]);
+             listen_sockets[i] = -1;
+             continue;
+        }
+        args->svm_id = i;
+        args->listen_fd = listen_sockets[i];
+
+        // Запускаем поток-слушатель
+        if (pthread_create(&listener_threads[i], NULL, listener_thread_func, args) != 0) {
+            perror("SVM: Failed to create listener thread");
+            close(listen_sockets[i]);
+            listen_sockets[i] = -1;
+            free(args);
+            // TODO: Более чистая остановка уже запущенных listener'ов?
+            continue;
+        }
+        listeners_started++;
+    } // end for start listeners
+
+    if (listeners_started == 0) {
+        fprintf(stderr, "SVM: Failed to start any listeners. Exiting.\n");
+        goto cleanup_queues;
+    }
+
+    // --- Запуск общих потоков ---
+    printf("SVM: Starting common threads (Timer, Sender)...\n");
+    if (pthread_create(&timer_tid, NULL, timer_thread_func, svm_instances) != 0) { /*...*/ goto cleanup_listeners; }
+    if (pthread_create(&sender_tid, NULL, sender_thread_func, NULL) != 0) { /*...*/ goto cleanup_timer; }
     threads_started = true;
-    printf("SVM (LAK 0x%02X): All threads started. Running...\n", svm_logical_address);
+    printf("SVM: All common threads started. %d listeners active. Running...\n", listeners_started);
 
     // --- Ожидание завершения ---
-    // Главный поток просто ждет завершения потока Receiver
-    // Receiver завершится при ошибке, закрытии соединения или сигнале keep_running = false
-    if (receiver_tid != 0) {
-        pthread_join(receiver_tid, NULL);
-        printf("SVM Main: Receiver thread joined.\n");
+    // Главный поток просто ждет сигнала завершения или ошибки
+    // Ожидание потоков-слушателей будет в секции cleanup
+    while(keep_running) {
+        sleep(1); // Просто спим, основная работа в других потоках
     }
 
-    // Если Receiver завершился, а мы еще работаем, инициируем остановку
-    if (keep_running) {
-        printf("SVM Main: Receiver exited unexpectedly. Initiating shutdown...\n");
-        keep_running = false;
-         // Сигналим остальным потокам
-         if (svm_incoming_queue) queue_shutdown(svm_incoming_queue);
-         if (svm_outgoing_queue) queue_shutdown(svm_outgoing_queue);
-         stop_timer_thread();
-         if (global_client_handle >= 0) shutdown(global_client_handle, SHUT_RDWR);
-    }
+    printf("SVM Main: Shutdown initiated. Waiting for threads to join...\n");
 
-    // --- Ожидание остальных потоков ---
-    printf("SVM Main: Joining remaining threads...\n");
-    if (processor_tid != 0) pthread_join(processor_tid, NULL);
-    printf("SVM Main: Processor thread joined.\n");
-    if (sender_tid != 0) pthread_join(sender_tid, NULL);
-    printf("SVM Main: Sender thread joined.\n");
-    if (timer_tid != 0) pthread_join(timer_tid, NULL);
-    printf("SVM Main: Timer thread joined.\n");
+    // --- Ожидание завершения и очистка ---
 
-    goto cleanup_connection; // Переходим к очистке
-
-// Метки для корректной очистки при ошибках на разных этапах
-cleanup_processor:
-    if (threads_started) { keep_running = false; pthread_cancel(processor_tid); pthread_join(processor_tid, NULL); }
-cleanup_receiver:
-    if (threads_started) { pthread_cancel(receiver_tid); pthread_join(receiver_tid, NULL); }
 cleanup_timer:
-    if (threads_started) { stop_timer_thread(); pthread_join(timer_tid, NULL); }
-cleanup_connection:
-    if (global_client_handle >= 0) {
-        if (io_svm) io_svm->disconnect(io_svm, global_client_handle);
-        else close(global_client_handle);
-        global_client_handle = -1;
-        printf("SVM: Client handle closed.\n");
+    if (threads_started && timer_tid != 0) {
+        stop_timer_thread_signal();
+        pthread_join(timer_tid, NULL);
+        printf("SVM Main: Timer thread joined.\n");
     }
-cleanup_queues:
-    if (svm_incoming_queue) queue_destroy(svm_incoming_queue);
-    if (svm_outgoing_queue) queue_destroy(svm_outgoing_queue);
-cleanup_io:
-    if (listen_socket_fd >= 0) { // Закрываем слушающий сокет, если остался
-         if (io_svm) io_svm->disconnect(io_svm, listen_socket_fd);
-         else close(listen_socket_fd);
+cleanup_listeners: // Сюда приходим, если не удалось запустить Sender или Timer
+    // Сигналим и ждем завершения потоков-слушателей
+    keep_running = false; // Убедимся, что флаг установлен
+    // Обработчик сигнала уже закрыл сокеты, потоки должны выйти из accept
+    printf("SVM Main: Waiting for listener threads to join...\n");
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        if (listener_threads[i] != 0) {
+            pthread_join(listener_threads[i], NULL);
+             printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
+        }
+         // Рабочие потоки экземпляров (Receiver/Processor) завершатся и будут собраны внутри listener_thread_func
     }
-    if (io_svm) io_svm->destroy(io_svm);
-cleanup_sync:
-    destroy_svm_counters_mutex_and_cond();
+    printf("SVM Main: All listener threads joined.\n");
 
-    printf("SVM (ID %d) finished.\n", svm_id);
-    return 0;
+    // Ждем общий Sender поток (если он был запущен)
+    if (threads_started && sender_tid != 0) {
+        // Sender завершится, когда его очередь станет пустой и shutdown=true
+         if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue); // На всякий случай
+        pthread_join(sender_tid, NULL);
+        printf("SVM Main: Sender thread joined.\n");
+    }
+
+cleanup_queues:
+	printf("SVM: Cleaning up queues...\n");
+    if (svm_outgoing_queue) qmq_destroy(svm_outgoing_queue);
+    // Входящие очереди уничтожаются внутри listener_thread_func
+
+// cleanup_io: // IO интерфейсы создавались и уничтожались локально
+//     printf("SVM: Cleaning up IO interface...\n");
+//     // Слушающие сокеты уже закрыты в обработчике или listener'ах
+
+cleanup_sync:
+    printf("SVM: Cleaning up synchronization primitives...\n");
+    destroy_svm_timer_sync();
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        pthread_mutex_destroy(&svm_instances[i].instance_mutex);
+    }
+    pthread_mutex_destroy(&svm_instances_mutex);
+
+    printf("SVM: Cleanup finished. Exiting.\n");
+	return 0;
 }
