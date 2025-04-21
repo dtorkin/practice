@@ -110,22 +110,49 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, uvm_handle_shutdown_signal);
     signal(SIGTERM, uvm_handle_shutdown_signal);
 
-    printf("UVM: Connecting to SVMs...\n");
-    pthread_mutex_lock(&uvm_links_mutex);
-    for (int i = 0; i < num_svms_in_config; ++i) {
-         if (!config.svm_config_loaded[i]) continue;
-         printf("UVM: Attempting to connect to SVM ID %d (Port: %d)...\n", i, config.svm_ethernet[i].port);
-         svm_links[i].status = UVM_LINK_CONNECTING;
-         svm_links[i].assigned_lak = config.svm_settings[i].lak;
-         EthernetConfig target_config = config.uvm_ethernet_target;
-         target_config.port = config.svm_ethernet[i].port;
-         svm_links[i].io_handle = create_ethernet_interface(&target_config);
-         if (!svm_links[i].io_handle) { /*...*/ svm_links[i].status = UVM_LINK_FAILED; continue; }
-         svm_links[i].connection_handle = svm_links[i].io_handle->connect(svm_links[i].io_handle);
-         if (svm_links[i].connection_handle < 0) { /*...*/ }
-         else { /*...*/ svm_links[i].status = UVM_LINK_ACTIVE; active_svm_count++; }
-    }
-    pthread_mutex_unlock(&uvm_links_mutex);
+	printf("UVM: Connecting to SVMs...\n");
+	pthread_mutex_lock(&uvm_links_mutex);
+	for (int i = 0; i < num_svms_in_config; ++i) {
+		 if (!config.svm_config_loaded[i]) continue;
+
+		 printf("UVM: Attempting to connect to SVM ID %d (IP: %s, Port: %d)...\n",
+				i, config.uvm_ethernet_target.target_ip, config.svm_ethernet[i].port);
+
+		 svm_links[i].status = UVM_LINK_CONNECTING;
+		 svm_links[i].assigned_lak = config.svm_settings[i].lak;
+
+		 // --- Создаем конфигурацию для этого конкретного SVM ---
+		 EthernetConfig current_svm_config = {0};
+		 strncpy(current_svm_config.target_ip,
+				 config.uvm_ethernet_target.target_ip,
+				 sizeof(current_svm_config.target_ip) - 1);
+		 current_svm_config.port = config.svm_ethernet[i].port;
+		 current_svm_config.base.type = IO_TYPE_ETHERNET;
+
+		 // --- Создаем НОВЫЙ IO интерфейс ДЛЯ ЭТОГО ЛИНКА ---
+		 svm_links[i].io_handle = create_ethernet_interface(¤t_svm_config); // <-- Создаем здесь
+		 if (!svm_links[i].io_handle) {
+			 fprintf(stderr, "UVM: Failed to create IO interface for SVM ID %d.\n", i);
+			 svm_links[i].status = UVM_LINK_FAILED;
+			 continue; // Пропускаем этот линк
+		 }
+
+		 // Выполняем подключение, используя СОБСТВЕННЫЙ io_handle линка
+		 svm_links[i].connection_handle = svm_links[i].io_handle->connect(svm_links[i].io_handle);
+		 if (svm_links[i].connection_handle < 0) {
+			 fprintf(stderr, "UVM: Failed to connect to SVM ID %d (IP: %s, Port: %d).\n",
+					 i, current_svm_config.target_ip, current_svm_config.port);
+			 svm_links[i].status = UVM_LINK_FAILED;
+			 // Важно: Уничтожаем созданный интерфейс, если подключение не удалось
+			 svm_links[i].io_handle->destroy(svm_links[i].io_handle);
+			 svm_links[i].io_handle = NULL;
+		 } else {
+			 printf("UVM: Successfully connected to SVM ID %d (Handle: %d).\n", i, svm_links[i].connection_handle);
+			 svm_links[i].status = UVM_LINK_ACTIVE;
+			 active_svm_count++;
+		 }
+	} // end for
+	pthread_mutex_unlock(&uvm_links_mutex);
 
     if (active_svm_count == 0) { /*...*/ goto cleanup_queues; }
     printf("UVM: Connected to %d out of %d configured SVMs.\n", active_svm_count, num_svms_in_config);
@@ -301,11 +328,21 @@ cleanup_threads:
 
 cleanup_connections:
     printf("UVM: Завершение работы и очистка ресурсов...\n");
-    pthread_mutex_lock(&uvm_links_mutex);
-    for (int i = 0; i < num_svms_in_config; ++i) {
-        if (svm_links[i].io_handle) { /*...*/ } // Как было
-    }
-    pthread_mutex_unlock(&uvm_links_mutex);
+	pthread_mutex_lock(&uvm_links_mutex);
+	for (int i = 0; i < num_svms_in_config; ++i) { // Используем num_svms_in_config или MAX_SVM_CONFIGS
+		if (svm_links[i].io_handle) { // Проверяем, что интерфейс был создан
+			if (svm_links[i].connection_handle >= 0) {
+				svm_links[i].io_handle->disconnect(svm_links[i].io_handle, svm_links[i].connection_handle);
+				printf("UVM: Connection for SVM ID %d closed.\n", i);
+			}
+			svm_links[i].io_handle->destroy(svm_links[i].io_handle); // <-- Уничтожаем интерфейс
+			 printf("UVM: IO Interface for SVM ID %d destroyed.\n", i);
+			svm_links[i].io_handle = NULL; // Обнуляем указатель
+			svm_links[i].connection_handle = -1;
+			svm_links[i].status = UVM_LINK_INACTIVE;
+		}
+	}
+	pthread_mutex_unlock(&uvm_links_mutex);
 
 cleanup_queues:
     if (uvm_outgoing_request_queue) queue_req_destroy(uvm_outgoing_request_queue); // Правильное имя
