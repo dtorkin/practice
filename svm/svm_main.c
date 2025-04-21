@@ -30,6 +30,7 @@
 #include "svm_types.h"
 
 // --- Глобальные переменные ---
+AppConfig config;
 SvmInstance svm_instances[MAX_SVM_CONFIGS]; // Используем MAX_SVM_CONFIGS из config.h
 ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;
 // IOInterface *io_svm = NULL; // IO интерфейс теперь создается для каждого listener'а
@@ -71,8 +72,30 @@ void handle_shutdown_signal(int sig) {
 }
 
 // --- Функция инициализации экземпляра (без изменений) ---
-void initialize_svm_instance(SvmInstance *instance, int id) { /* ... как раньше ... */ }
-
+void initialize_svm_instance(SvmInstance *instance, int id) {
+    if (!instance) return;
+    memset(instance, 0, sizeof(SvmInstance));
+    instance->id = id;
+    instance->client_handle = -1;
+    instance->is_active = false;
+    instance->incoming_queue = NULL;
+    instance->receiver_tid = 0;
+    instance->processor_tid = 0;
+    instance->current_state = STATE_NOT_INITIALIZED;
+    instance->message_counter = 0;
+    instance->bcb_counter = 0;
+    instance->link_up_changes_counter = 0;
+    instance->link_up_low_time_us100 = 0;
+    instance->sign_det_changes_counter = 0;
+    instance->link_status_timer_counter = 0;
+    // Инициализация мьютекса происходит один раз в main
+    // если pthread_mutex_init вызывается здесь, то нужен destroy при удалении
+    // Оставляем инициализацию мьютекса в main
+    // if (pthread_mutex_init(&instance->instance_mutex, NULL) != 0) {
+    //      perror("Failed to initialize instance mutex");
+    //      exit(EXIT_FAILURE);
+    // }
+}
 
 // --- Поток-слушатель для одного порта/экземпляра ---
 typedef struct {
@@ -235,11 +258,20 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
     init_message_handlers();
 
     // Инициализация всех экземпляров и слушающих сокетов
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-        initialize_svm_instance(&svm_instances[i], i);
-        listen_sockets[i] = -1; // Инициализация массива дескрипторов
-        listener_threads[i] = 0;
-    }
+	for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+		initialize_svm_instance(&svm_instances[i], i);
+		// Инициализируем мьютекс экземпляра ЗДЕСЬ
+		if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
+			perror("Failed to initialize instance mutex");
+			// Очистка уже созданных мьютексов перед выходом
+			for (int j = 0; j < i; ++j) {
+				pthread_mutex_destroy(&svm_instances[j].instance_mutex);
+			}
+			exit(EXIT_FAILURE);
+		}
+		listen_sockets[i] = -1;
+		listener_threads[i] = 0;
+	}
 
     // Загрузка конфигурации (читает все секции)
     printf("SVM: Loading configuration...\n");
@@ -375,7 +407,7 @@ cleanup_sync:
     printf("SVM: Cleaning up synchronization primitives...\n");
     destroy_svm_timer_sync();
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-        pthread_mutex_destroy(&svm_instances[i].instance_mutex);
+        pthread_mutex_destroy(&svm_instances[i].instance_mutex); // <-- Уничтожаем мьютекс
     }
     pthread_mutex_destroy(&svm_instances_mutex);
 

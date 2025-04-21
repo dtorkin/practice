@@ -4,42 +4,47 @@
  * Описание:
  * Определяет структуру для хранения конфигурации приложения
  * и объявляет функцию для загрузки конфигурации из файла.
+ * (Версия для загрузки ВСЕХ настроек SVM)
  */
-
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Включаем определения интерфейсов, где теперь определены EthernetConfig и SerialConfig
-#include "../io/io_interface.h" // Путь может быть ../io/io_interface.h в зависимости от структуры include
-#include "../protocol/protocol_defs.h"
-#include "../svm/svm_types.h"
+#include "../io/io_interface.h" // Нужен для EthernetConfig, SerialConfig
+#include "../protocol/protocol_defs.h" // Нужен для LogicalAddress
+
+// Максимальное количество SVM, чьи настройки можно хранить и эмулировать
+#define MAX_SVM_CONFIGS 4 // <-- ДОБАВЛЕНО ОПРЕДЕЛЕНИЕ
+
+// Настройки, специфичные для одного SVM
+typedef struct {
+    LogicalAddress lak;
+} SvmInstanceSettings;
+
+// Настройки Ethernet для одного SVM
+typedef struct {
+    uint16_t port;
+} SvmEthernetConfig;
+
 
 // Основная структура конфигурации
 typedef struct {
-    // Секция [communication]
-    char interface_type[16]; // "ethernet" или "serial"
+    // Общие настройки
+    char interface_type[16];
 
-    // Секция [ethernet]
-    EthernetConfig ethernet; // Тип теперь известен из io_interface.h
+    // --- Настройки для SVM ---
+    SvmEthernetConfig svm_ethernet[MAX_SVM_CONFIGS];
+    SvmInstanceSettings svm_settings[MAX_SVM_CONFIGS];
+    bool svm_config_loaded[MAX_SVM_CONFIGS];
+    int num_svm_configs_found;
 
-    // Секция [serial]
-    SerialConfig serial;     // Тип теперь известен из io_interface.h
-
-    int num_svm_instances; // Количество эмулируемых SVM
-    int base_svm_lak;      // Базовый логический адрес для первого 
-    // Можно добавить другие секции и параметры по мере необходимости
+    // --- Настройки для UVM ---
+    EthernetConfig uvm_ethernet_target; // Параметры цели для UVM
+    SerialConfig serial;                // Параметры Serial
 
 } AppConfig;
 
 /**
- * @brief Загружает конфигурацию из INI-файла.
- *
- * Заполняет структуру AppConfig значениями из файла.
- * Устанавливает значения по умолчанию, если файл или параметры отсутствуют.
- *
- * @param filename Имя конфигурационного файла.
- * @param config Указатель на структуру AppConfig для заполнения.
- * @return 0 в случае успеха, -1 если файл не найден, >0 если ошибка парсинга (код ошибки inih).
+ * @brief Загружает ВСЮ конфигурацию из INI-файла.
  */
 int load_config(const char *filename, AppConfig *config);
 
