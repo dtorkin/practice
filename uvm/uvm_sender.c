@@ -15,7 +15,7 @@
 #include "../config/config.h" // Для MAX_SVM_CONFIGS
 
 // Внешние переменные из uvm_main.c
-extern ThreadSafeQueueReq *uvm_outgoing_request_queue;
+extern ThreadSafeReqQueue *uvm_outgoing_request_queue;
 extern UvmSvmLink svm_links[MAX_SVM_CONFIGS];
 extern pthread_mutex_t uvm_links_mutex; // Мьютекс для доступа к svm_links
 extern volatile bool uvm_keep_running;
