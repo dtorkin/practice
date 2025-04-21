@@ -111,6 +111,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, uvm_handle_shutdown_signal);
 
 	printf("UVM: Connecting to SVMs...\n");
+	printf("DEBUG UVM: IP before loop: %s\n", config.uvm_ethernet_target.target_ip);
 	pthread_mutex_lock(&uvm_links_mutex);
 	for (int i = 0; i < num_svms_in_config; ++i) {
 		 if (!config.svm_config_loaded[i]) continue;
