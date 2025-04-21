@@ -9,6 +9,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stdbool.h>    // <-- ВКЛЮЧИТЬ для bool
 #include "../io/io_interface.h" // Нужен для EthernetConfig, SerialConfig
 #include "../protocol/protocol_defs.h" // Нужен для LogicalAddress
 

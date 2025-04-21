@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <stdbool.h>    // <-- ВКЛЮЧИТЬ для bool
 #include "ini.h"
 #include "../protocol/protocol_defs.h" // Для LOGICAL_ADDRESS_...
 
