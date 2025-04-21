@@ -124,10 +124,17 @@ int main(int argc, char *argv[]) {
 		 // --- Создаем конфигурацию для этого конкретного SVM ---
 		 EthernetConfig current_svm_config = {0};
 		 strncpy(current_svm_config.target_ip,
-				 config.uvm_ethernet_target.target_ip,
+				 config.uvm_ethernet_target.target_ip, // Убедись, что здесь ПРАВИЛЬНОЕ поле
 				 sizeof(current_svm_config.target_ip) - 1);
+		 // current_svm_config.target_ip[sizeof(current_svm_config.target_ip) - 1] = '\0'; // strncpy не всегда добавляет null-терминатор! Добавим явно.
+
+		 // Устанавливаем порт конкретного SVM
 		 current_svm_config.port = config.svm_ethernet[i].port;
 		 current_svm_config.base.type = IO_TYPE_ETHERNET;
+
+		 // Добавим отладочный вывод ПЕРЕД созданием интерфейса
+		 printf("DEBUG UVM: Preparing to create interface for SVM %d with IP=%s, Port=%d\n",
+				i, current_svm_config.target_ip, current_svm_config.port);
 
 		 // --- Создаем НОВЫЙ IO интерфейс ДЛЯ ЭТОГО ЛИНКА ---
 		 svm_links[i].io_handle = create_ethernet_interface(&current_svm_config); // <-- Создаем здесь
