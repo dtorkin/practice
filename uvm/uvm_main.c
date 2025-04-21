@@ -23,6 +23,7 @@
 #include "../utils/ts_uvm_resp_queue.h" // Новая очередь ответов от Receiver'ов
 #include "uvm_types.h"
 #include "uvm_utils.h" // Включаем созданный .h
+#include "uvm_utils.c" // Включаем созданный .h
 
 // --- Глобальные переменные ---
 AppConfig config;
