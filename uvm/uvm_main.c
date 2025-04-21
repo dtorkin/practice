@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <time.h> // Для nanosleep
+#include <sys/socket.h>
 
 #include "../config/config.h"
 #include "../io/io_interface.h"
