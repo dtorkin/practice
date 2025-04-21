@@ -355,7 +355,7 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
     // --- Ожидание завершения и очистка ---
     // Метки cleanup используются для каскадной очистки при ошибках старта
 cleanup_timer:
-    if (threads_started && timer_tid != 0) {
+    if (common_threads_started && timer_tid != 0) {
         stop_timer_thread_signal(); // Сигналим таймеру остановиться
         pthread_join(timer_tid, NULL);
         printf("SVM Main: Timer thread joined.\n");
@@ -374,7 +374,7 @@ cleanup_listeners:
     printf("SVM Main: All listener threads joined.\n");
 
     // Ждем общий Sender поток (если он был запущен)
-    if (threads_started && sender_tid != 0) {
+    if (common_threads_started && sender_tid != 0) {
         // Sender завершится, когда его очередь станет пустой и shutdown=true
          if (svm_outgoing_queue && !svm_outgoing_queue->shutdown) {
              qmq_shutdown(svm_outgoing_queue); // Сигналим на всякий случай
