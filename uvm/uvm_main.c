@@ -101,24 +101,30 @@ void wait_for_outstanding_sends(void) {
 int main(int argc, char *argv[]) {
     pthread_t sender_tid = 0;
     int active_svm_count = 0;
+    // Определяем переменную mode ЗДЕСЬ
     RadarMode mode = MODE_DR; // По умолчанию ДР
 
     // --- Парсинг аргумента командной строки для выбора режима ---
     if (argc > 1) {
         printf("DEBUG UVM: Got mode argument: %s\n", argv[1]);
-        if (strcasecmp(argv[1], "OP") == 0) mode = MODE_OR;
-        else if (strcasecmp(argv[1], "OR1") == 0) mode = MODE_OR1;
-        else if (strcasecmp(argv[1], "DR") == 0) mode = MODE_DR;
-        else if (strcasecmp(argv[1], "VR") == 0) mode = MODE_VR;
-        else {
+        if (strcasecmp(argv[1], "OP") == 0) {
+             mode = MODE_OR; // <-- Присваиваем значение ЗДЕСЬ
+        } else if (strcasecmp(argv[1], "OR1") == 0) {
+             mode = MODE_OR1; // <-- Присваиваем значение ЗДЕСЬ
+        } else if (strcasecmp(argv[1], "DR") == 0) {
+             mode = MODE_DR; // <-- Присваиваем значение ЗДЕСЬ
+        } else if (strcasecmp(argv[1], "VR") == 0) {
+             mode = MODE_VR; // <-- Присваиваем значение ЗДЕСЬ
+        } else {
              printf("UVM: Warning: Unknown mode '%s'. Using default DR.\n", argv[1]);
-             mode = MODE_DR;
+             mode = MODE_DR; // Явно ставим дефолт
         }
     } else {
          printf("DEBUG UVM: No mode argument provided. Using default DR.\n");
+         mode = MODE_DR; // Убедимся, что дефолт установлен
     }
-    printf("DEBUG UVM: Effective RadarMode selected: %d\n", mode);
-
+    // Отладочный вывод СРАЗУ ПОСЛЕ парсинга
+    printf("DEBUG UVM: Effective RadarMode selected: %d\n", mode); // Проверяем значение mode
 
     // --- Инициализация ---
     if (pthread_mutex_init(&uvm_links_mutex, NULL) != 0) {
@@ -232,8 +238,6 @@ int main(int argc, char *argv[]) {
     // --- Основная логика UVM ---
     UvmRequest request;
     request.type = UVM_REQ_SEND_MESSAGE;
-    // Используем атомарные счетчики или мьютекс для номеров сообщений, если они общие
-    // Пока сделаем отдельные для простоты
     uint16_t msg_counters[MAX_SVM_CONFIGS] = {0};
 
     printf("\n--- Подготовка к сеансу наблюдения ---\n");
@@ -278,6 +282,7 @@ int main(int argc, char *argv[]) {
     wait_for_outstanding_sends();
 
     printf("\n--- Подготовка к сеансу съемки ---\n");
+    printf("DEBUG UVM: Mode before sending parameters: %d\n", mode); // <-- ЕЩЕ ОДНА ПРОВЕРКА
      for (int i = 0; i < num_svms_in_config; ++i) {
         pthread_mutex_lock(&uvm_links_mutex);
         bool should_send = (svm_links[i].status == UVM_LINK_ACTIVE);
@@ -286,9 +291,10 @@ int main(int argc, char *argv[]) {
 
         if (should_send) {
              request.target_svm_id = i;
-             uint16_t current_msg_num = msg_counters[i]; // Берем текущий номер
+             uint16_t current_msg_num = msg_counters[i];
 
-             if (mode == MODE_DR) {
+             // Отправка параметров в зависимости от режима
+             if (mode == MODE_DR) { // <-- Условие проверяет mode
                  printf("UVM Main (SVM %d): Sending DR parameters...\n", i);
                  request.message = create_prinyat_parametry_sdr_message(current_lak, current_msg_num++);
                  PrinyatParametrySdrBodyBase sdr_body_base = {0}; sdr_body_base.pp_nl=(uint8_t)mode|1; sdr_body_base.q=htons(1500);
@@ -302,7 +308,7 @@ int main(int argc, char *argv[]) {
                  request.message.header.body_length = htons(sizeof(tsd_body_base));
                  send_uvm_request(&request);
 
-             } else if (mode == MODE_OR || mode == MODE_OR1) {
+             } else if (mode == MODE_OR || mode == MODE_OR1) { // <-- Условие проверяет mode
                  printf("UVM Main (SVM %d): Sending OR/OR1 parameters...\n", i);
                  request.message = create_prinyat_parametry_so_message(current_lak, current_msg_num++);
                  PrinyatParametrySoBody so_body = {0}; so_body.pp=mode; so_body.knk=htons(400);
@@ -328,7 +334,7 @@ int main(int argc, char *argv[]) {
                  request.message.header.body_length = htons(sizeof(reper_body));
                  send_uvm_request(&request);
 
-             } else if (mode == MODE_VR) {
+             } else if (mode == MODE_VR) { // <-- Условие проверяет mode
                  printf("UVM Main (SVM %d): Sending VR parameters...\n", i);
                  request.message = create_prinyat_parametry_so_message(current_lak, current_msg_num++);
                  PrinyatParametrySoBody so_body = {0}; so_body.pp=mode; so_body.knk=htons(500);
