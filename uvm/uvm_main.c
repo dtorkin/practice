@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
 		 current_svm_config.base.type = IO_TYPE_ETHERNET;
 
 		 // --- Создаем НОВЫЙ IO интерфейс ДЛЯ ЭТОГО ЛИНКА ---
-		 svm_links[i].io_handle = create_ethernet_interface(¤t_svm_config); // <-- Создаем здесь
+		 svm_links[i].io_handle = create_ethernet_interface(&current_svm_config); // <-- Создаем здесь
 		 if (!svm_links[i].io_handle) {
 			 fprintf(stderr, "UVM: Failed to create IO interface for SVM ID %d.\n", i);
 			 svm_links[i].status = UVM_LINK_FAILED;
