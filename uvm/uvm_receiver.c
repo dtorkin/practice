@@ -80,10 +80,10 @@ void* uvm_receiver_thread_func(void* arg) {
              }
         } else { // Успех
             // Копируем сообщение в структуру для очереди
-            memcpy(&response_msg.message, &receivedMessage, sizeof(Message));
-
-            // Помещаем в ОБЩУЮ очередь ответов
-            if (!uvq_enqueue(uvm_incoming_response_queue, &response_msg)) {
+			response_msg.source_svm_id = svm_id; // <-- Устанавливаем ID ПЕРЕД enqueue
+			memcpy(&response_msg.message, &receivedMessage, sizeof(Message)); // Копируем сообщение
+			// Помещаем в ОБЩУЮ очередь ответов
+			if (!uvq_enqueue(uvm_incoming_response_queue, &response_msg)) {
                  if (uvm_keep_running) {
                     fprintf(stderr, "Receiver Thread (SVM %d): Failed to enqueue message to response queue (shutdown?). Exiting.\n", svm_id);
                  }

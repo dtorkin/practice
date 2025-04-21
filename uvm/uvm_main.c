@@ -157,10 +157,14 @@ int main(int argc, char *argv[]) {
 
         if (should_send) {
             request.target_svm_id = i;
-            // 1. Инициализация канала
-            request.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, current_lak, msg_num_init++);
-            // Тело заполняется внутри билдера (согласно его C-файлу, хоть H и другой)
-            send_uvm_request(&request);
+			// 1. Инициализация канала
+			request.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, current_lak, msg_num_init++);
+			// Заполняем тело ПОСЛЕ вызова билдера
+			InitChannelBody *init_body = (InitChannelBody *)request.message.body;
+			init_body->lauvm = LOGICAL_ADDRESS_UVM_VAL; // Наш адрес UVM
+			init_body->lak = current_lak;              // Адрес, который должен установить SVM
+			// Длина тела уже установлена билдером через SET_HEADER
+			send_uvm_request(&request);
 
             // 2. Провести контроль
             request.message = create_provesti_kontrol_message(current_lak, 0x01, msg_num_kontrol++); // TK=1
