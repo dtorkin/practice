@@ -1,158 +1,119 @@
 /*
  * uvm/uvm_sender.c
- * ... (includes) ...
+ * Описание: Поток UVM для отправки сообщений разным SVM.
  */
+#include "uvm_sender.h" // (Если есть)
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <stdbool.h>
-#include <arpa/inet.h> // Для ntohs
+#include <sys/socket.h>
 
-#include "uvm_types.h"
-#include "../utils/ts_queue_req.h"
-#include "../protocol/protocol_defs.h"
-#include "../protocol/message_builder.h"
+#include "../utils/ts_queue_req.h" // Очередь запросов
 #include "../io/io_common.h"
-#include "../io/io_interface.h"
+#include "uvm_types.h"
+#include "../config/config.h" // Для MAX_SVM_CONFIGS
 
-
-// --- Внешние переменные (из uvm_main) ---
-extern IOInterface *io_uvm;
-extern ThreadSafeReqQueue *uvm_outgoing_request_queue;
+// Внешние переменные из uvm_main.c
+extern ThreadSafeQueueReq *uvm_outgoing_request_queue;
+extern UvmSvmLink svm_links[MAX_SVM_CONFIGS];
+extern pthread_mutex_t uvm_links_mutex; // Мьютекс для доступа к svm_links
 extern volatile bool uvm_keep_running;
-// --- Добавляем доступ к счетчику и cond var ---
-extern pthread_mutex_t uvm_send_counter_mutex;
-extern pthread_cond_t  uvm_send_counter_cond;
-extern volatile int    uvm_outstanding_sends;
-
-// --- Вспомогательная функция для вывода байт ---
-static void print_body_preview(const Message *msg, UvmRequestType req_type) {
-    const char* msg_name_str = uvm_request_type_to_message_name(req_type);
-    printf("Данные тела сообщения '%s' (первые 20 байт): ", msg_name_str);
-
-    // Используем -> для доступа к членам через указатель
-    uint16_t len = ntohs(msg->header.body_length); // Преобразуем для сравнения
-    for (int i = 0; i < 20 && i < len; ++i) {
-		printf("%02X ", msg->body[i]); // Используем ->
-	}
-	if (len > 20) printf("...");
-	printf("\n");
-}
-
+extern volatile int uvm_outstanding_sends; // Счетчик для синхронизации
+extern pthread_cond_t uvm_all_sent_cond;   // Условная переменная
+extern pthread_mutex_t uvm_send_counter_mutex; // Мьютекс для счетчика
 
 void* uvm_sender_thread_func(void* arg) {
     (void)arg;
     printf("UVM Sender thread started.\n");
     UvmRequest request;
-    Message messageToSend;
-    uint16_t msgCounter = 0;
+    bool shutdown_req_received = false;
 
-    while (true) {
+    while (!shutdown_req_received) {
+        // Извлекаем запрос из очереди
         if (!queue_req_dequeue(uvm_outgoing_request_queue, &request)) {
-            if (!uvm_keep_running && uvm_outgoing_request_queue->count == 0) break;
-            if(uvm_keep_running) { usleep(10000); continue; }
-            else { break; }
-        }
-
-        if (request.type == UVM_REQ_SHUTDOWN) { // Проверяем команду shutdown
-             printf("Sender Thread: Получен запрос на завершение.\n");
-             break; // Выходим из цикла
-        }
-
-        bool need_send = true;
-        switch (request.type) {
-            case UVM_REQ_INIT_CHANNEL:
-                messageToSend = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                break;
-            case UVM_REQ_PROVESTI_KONTROL:
-                messageToSend = create_provesti_kontrol_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, request.tk_param, msgCounter++);
-                break;
-            case UVM_REQ_VYDAT_REZULTATY:
-                 messageToSend = create_vydat_rezultaty_kontrolya_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, request.vpk_param, msgCounter++);
-                 break;
-            case UVM_REQ_VYDAT_SOSTOYANIE:
-                 messageToSend = create_vydat_sostoyanie_linii_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_PARAM_SO:
-                 messageToSend = create_prinyat_parametry_so_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_TIME_REF:
-                 messageToSend = create_prinyat_time_ref_range_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_REPER:
-                 messageToSend = create_prinyat_reper_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_PARAM_SDR:
-                 messageToSend = create_prinyat_parametry_sdr_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 // TODO: Добавить HRR массив и обновить длину
-                 break;
-            case UVM_REQ_PRIYAT_PARAM_3TSO:
-                 messageToSend = create_prinyat_parametry_3tso_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_REF_AZIMUTH:
-                 messageToSend = create_prinyat_ref_azimuth_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-            case UVM_REQ_PRIYAT_PARAM_TSD:
-                  messageToSend = create_prinyat_parametry_tsd_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                  // TODO: Добавить OKM, HShMR, HAR массивы и обновить длину
-                  break;
-            case UVM_REQ_PRIYAT_NAV_DANNYE:
-                 messageToSend = create_navigatsionnye_dannye_message(LOGICAL_ADDRESS_SVM_PB_BZ_CHANNEL_1_VAL, msgCounter++);
-                 break;
-			default:
-                fprintf(stderr, "Sender Thread: Неизвестный тип запроса: %d\n", request.type);
-                need_send = false;
-                // Уменьшаем счетчик, т.к. отправки не будет
-                pthread_mutex_lock(&uvm_send_counter_mutex);
-                if (uvm_outstanding_sends > 0) {
-                     uvm_outstanding_sends--;
-                }
-                 // Сигналим Main на всякий случай, если он ждет нуля
-                if (uvm_outstanding_sends == 0) {
-                    pthread_cond_signal(&uvm_send_counter_cond);
-                }
-                pthread_mutex_unlock(&uvm_send_counter_mutex);
-                break;
-        }
-
-        if (!uvm_keep_running) break;
-
-
-        if (need_send) {
-            // --- Логика отправки ---
-            messageToSend.header.body_length = ntohs(messageToSend.header.body_length); // В хост для print_body_preview
-            print_body_preview(&messageToSend, request.type);
-            messageToSend.header.body_length = htons(messageToSend.header.body_length); // Обратно в сеть для send
-
-            if (send_protocol_message(io_uvm, io_uvm->io_handle, &messageToSend) != 0) {
-                fprintf(stderr, "Sender Thread: Ошибка отправки сообщения (тип запроса %d). Завершение.\n", request.type);
-                if(uvm_keep_running) { uvm_keep_running = false; /* ... */ }
-                // Не уменьшаем счетчик при ошибке, Main увидит ошибку и выйдет
+            if (!uvm_keep_running && uvm_outgoing_request_queue->count == 0) {
+                printf("Sender Thread: Request queue empty and shutdown signaled. Exiting.\n");
                 break;
             }
-            printf("Отправлено сообщение '%s'\n", uvm_request_type_to_message_name(request.type));
+            if(uvm_keep_running) usleep(10000); // Ложное пробуждение?
+            continue; // Продолжаем, если работаем или очередь не пуста
+        }
 
-            // --- Уменьшаем счетчик и сигналим Main после УСПЕШНОЙ отправки ---
+        // Обрабатываем запрос
+        if (request.type == UVM_REQ_SHUTDOWN) {
+            printf("Sender Thread: Received shutdown request.\n");
+            shutdown_req_received = true;
+            continue; // Выйдем из цикла на следующей итерации
+        }
+
+        if (request.type == UVM_REQ_SEND_MESSAGE) {
+            int svm_id = request.target_svm_id;
+            IOInterface *io = NULL;
+            int handle = -1;
+            bool is_active = false;
+
+            // Получаем данные соединения под мьютексом
+            pthread_mutex_lock(&uvm_links_mutex);
+            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS && svm_links[svm_id].status == UVM_LINK_ACTIVE) {
+                io = svm_links[svm_id].io_handle;
+                handle = svm_links[svm_id].connection_handle;
+                is_active = true;
+            }
+            pthread_mutex_unlock(&uvm_links_mutex);
+
+            if (is_active && io && handle >= 0) {
+                // Отправляем сообщение
+                if (send_protocol_message(io, handle, &request.message) != 0) {
+                    fprintf(stderr, "Sender Thread: Error sending message (type %u) to SVM ID %d (handle %d).\n",
+                           request.message.header.message_type, svm_id, handle);
+                    // Ошибка отправки - помечаем линк как неактивный
+                    pthread_mutex_lock(&uvm_links_mutex);
+                    if (svm_links[svm_id].status == UVM_LINK_ACTIVE) { // Доп. проверка
+                         svm_links[svm_id].status = UVM_LINK_FAILED;
+                         // Можно закрыть хэндл здесь или оставить Receiver'у/Main
+                         if (svm_links[svm_id].connection_handle >= 0) {
+                              shutdown(svm_links[svm_id].connection_handle, SHUT_RDWR);
+                              // close(svm_links[svm_id].connection_handle); // Не закрываем здесь
+                         }
+                         printf("Sender Thread: Marked SVM Link %d as FAILED due to send error.\n", svm_id);
+                         // Разбудить Receiver'а этого линка? (сложно без прямого доступа)
+                         // Main поток должен будет обработать статус FAILED
+                    }
+                    pthread_mutex_unlock(&uvm_links_mutex);
+                } else {
+                     // printf("Sender Thread: Message (type %u) sent to SVM ID %d.\n", request.message.header.message_type, svm_id);
+                }
+            } else {
+                 fprintf(stderr, "Sender Thread: Cannot send message to SVM ID %d (inactive or invalid).\n", svm_id);
+                 // Сообщение не отправлено, но счетчик все равно уменьшаем
+            }
+
+            // Уменьшаем счетчик ожидающих отправки и сигналим Main, если он ждет
             pthread_mutex_lock(&uvm_send_counter_mutex);
             if (uvm_outstanding_sends > 0) {
                 uvm_outstanding_sends--;
-                printf("Sender Thread: Сообщение отправлено, осталось %d\n", uvm_outstanding_sends);
-            } else {
-                // Этого не должно быть, если запросы добавляются корректно
-                fprintf(stderr, "Sender Thread: Warning - outstanding sends counter is already zero!\n");
-            }
-            // Если счетчик достиг нуля, сигналим Main, что все отправлено
-            if (uvm_outstanding_sends == 0) {
-                 printf("Sender Thread: Все ожидающие сообщения отправлены, сигналим Main.\n");
-                pthread_cond_signal(&uvm_send_counter_cond);
+                 //printf("Sender Thread: Decremented outstanding sends to %d\n", uvm_outstanding_sends);
+                if (uvm_outstanding_sends == 0) {
+                    //printf("Sender Thread: All pending messages sent, signaling Main.\n");
+                    pthread_cond_signal(&uvm_all_sent_cond);
+                }
             }
             pthread_mutex_unlock(&uvm_send_counter_mutex);
-            // --- Конец блока счетчика ---
+
+        } else {
+            printf("Sender Thread: Received unhandled request type %d.\n", request.type);
         }
-         // Выход из цикла по keep_running проверяется в начале следующей итерации
-    }
+    } // end while
 
     printf("UVM Sender thread finished.\n");
+    // Убедимся, что Main не застрянет в ожидании, если мы вышли из-за shutdown
+    pthread_mutex_lock(&uvm_send_counter_mutex);
+    if (uvm_outstanding_sends > 0) {
+        printf("Sender Thread: Exiting with %d outstanding sends (due to shutdown).\n", uvm_outstanding_sends);
+        uvm_outstanding_sends = 0; // Сбрасываем счетчик
+        pthread_cond_signal(&uvm_all_sent_cond); // Разбудить Main на всякий случай
+    }
+     pthread_mutex_unlock(&uvm_send_counter_mutex);
     return NULL;
 }

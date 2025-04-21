@@ -1,0 +1,4 @@
+#ifndef TS_UVM_RESP_QUEUE_FWD_H
+#define TS_UVM_RESP_QUEUE_FWD_H
+typedef struct ThreadSafeUvmRespQueue ThreadSafeUvmRespQueue;
+#endif // TS_UVM_RESP_QUEUE_FWD_H

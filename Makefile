@@ -45,7 +45,8 @@ CONFIG_SRCS = config/config.c \
 # Модуль Utils
 # УБРАН ts_queued_msg_queue.c, т.к. мы откатили SVM к использованию ts_queue
 UTILS_SRCS = utils/ts_queue.c \
-             utils/ts_queue_req.c # Оставляем ts_queue_req.c для UVM
+             utils/ts_queue_req.c \
+             utils/ts_uvm_resp_queue.c
 
 # --- Объектные файлы ---
 
