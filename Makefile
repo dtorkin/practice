@@ -36,15 +36,16 @@ SVM_TARGET = svm_app
 UVM_TARGET = uvm_app
 
 # --- Исходные файлы ---
-# Все .c файлы SVM (ВКЛЮЧАЯ main)
-SVM_C_SRCS = svm/svm_main.c \
-             svm/svm_handlers.c \
-             svm/svm_timers.c \
-             svm/svm_receiver.c \
-             svm/svm_processor.c \
-             svm/svm_sender.c
-# Все .cpp файлы SVM
+# C исходники для SVM (БЕЗ main)
+SVM_C_SRCS_ONLY = svm/svm_handlers.c \
+                  svm/svm_timers.c \
+                  svm/svm_receiver.c \
+                  svm/svm_processor.c \
+                  svm/svm_sender.c
+# C++ исходники для SVM GUI
 SVM_CXX_SRCS = svm/svm_gui.cpp
+# C исходник main для SVM (ОБРАБАТЫВАЕТСЯ ОТДЕЛЬНО)
+SVM_MAIN_C_SRC = svm/svm_main.c
 
 # C исходники для UVM
 UVM_SRCS = uvm/uvm_main.c uvm/uvm_sender.c uvm/uvm_receiver.c uvm/uvm_utils.c
@@ -58,9 +59,9 @@ COMMON_C_SRCS = protocol/message_utils.c \
                 utils/ts_queued_msg_queue.c utils/ts_uvm_resp_queue.c
 
 # --- Объектные файлы ---
-# Генерируем .o из .c
-SVM_C_OBJS = $(SVM_C_SRCS:.c=.o)
+SVM_C_OBJS_ONLY = $(SVM_C_SRCS_ONLY:.c=.o)
 SVM_CXX_OBJS = $(SVM_CXX_SRCS:.cpp=.o)
+SVM_MAIN_C_OBJ = $(SVM_MAIN_C_SRC:.c=.o) # Объектный файл для main
 COMMON_C_OBJS = $(COMMON_C_SRCS:.c=.o)
 UVM_OBJS = $(UVM_SRCS:.c=.o) $(COMMON_C_OBJS)
 
@@ -74,8 +75,8 @@ else
     SVM_MOC_OBJS =
 endif
 
-# Объектные файлы для SVM = ВСЕ .o из SVM (C и C++) + MOC(.o) + Общие(.o)
-SVM_ALL_OBJS = $(SVM_C_OBJS) $(SVM_CXX_OBJS) $(SVM_MOC_OBJS) $(COMMON_C_OBJS)
+# Объектные файлы для SVM = SVM модули(C) + SVM Main(ОСОБОЕ ПРАВИЛО) + SVM GUI(C++) + MOC(C++) + Общие(C)
+SVM_ALL_OBJS = $(SVM_C_OBJS_ONLY) $(SVM_MAIN_C_OBJ) $(SVM_CXX_OBJS) $(SVM_MOC_OBJS) $(COMMON_C_OBJS)
 
 # --- Правила сборки ---
 all: $(SVM_TARGET) $(UVM_TARGET)
@@ -83,7 +84,7 @@ all: $(SVM_TARGET) $(UVM_TARGET)
 # Правило для сборки SVM (используем CXX для линковки)
 $(SVM_TARGET): $(SVM_ALL_OBJS)
 	@echo "Linking $(SVM_TARGET)..."
-	$(CXX) $(SVM_ALL_OBJS) -o $(SVM_TARGET) $(LDFLAGS) $(LIBS) # Убрал $(CXXFLAGS) из линковки
+	$(CXX) $(SVM_ALL_OBJS) -o $(SVM_TARGET) $(LDFLAGS) $(LIBS) # Передаем объектные файлы линкеру C++
 	@echo "SVM application ($(SVM_TARGET)) built successfully."
 
 # Правило для сборки UVM (используем CC)
@@ -92,19 +93,21 @@ $(UVM_TARGET): $(UVM_OBJS)
 	$(CC) $(UVM_OBJS) -o $(UVM_TARGET) $(LDFLAGS) $(LIBS_BASE) # UVM не нужны Qt библиотеки
 	@echo "UVM application ($(UVM_TARGET)) built successfully."
 
-# Правило компиляции C файлов (используем CC и CFLAGS)
-# Применяется ко всем .c, включая svm_main.c
+# Правило компиляции C файлов (для всех, КРОМЕ svm_main.c)
+# Используем стандартное правило, но оно не должно применяться к svm_main.c из-за явного правила ниже
 %.o: %.c
 	@echo "Compiling (C) $<..."
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Правило компиляции C++ файлов (используем CXX и CXXFLAGS)
-# Применяется к svm_gui.cpp и moc_*.cpp
+# Правило компиляции C++ файлов
 %.o: %.cpp
 	@echo "Compiling (C++) $<..."
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-# !!! УБРАНО явное правило для svm_main.o !!!
+# !!! ВОЗВРАЩАЕМ ЯВНОЕ ПРАВИЛО для компиляции svm_main.c с помощью CXX !!!
+$(SVM_MAIN_C_OBJ): $(SVM_MAIN_C_SRC) $(wildcard svm/*.h) $(wildcard config/*.h) # Зависимости
+	@echo "Compiling (C++-Linkable C) $<..."
+	$(CXX) $(CXXFLAGS) -c -o $@ $< # <-- Используем CXX и CXXFLAGS
 
 # Правило для MOC
 moc_%.cpp: svm/%.h
@@ -114,8 +117,8 @@ moc_%.cpp: svm/%.h
 # Правило для очистки
 clean:
 	@echo "Cleaning up build files..."
-	# Удаляем все .o файлы во всех поддиректориях
-	rm -f $(find . -name '*.o') \
+	rm -f $(SVM_C_SRCS_ONLY:.c=.o) $(SVM_MAIN_C_OBJ) $(SVM_CXX_SRCS:.cpp=.o) \
+	      $(UVM_SRCS:.c=.o) $(COMMON_C_OBJS) $(SVM_MOC_OBJS) \
 	      $(SVM_TARGET) $(UVM_TARGET) \
 	      moc_*.cpp core.* *.core *~
 	@echo "Cleanup finished."
