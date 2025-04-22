@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
         svm_links[i].status = UVM_LINK_INACTIVE;
         svm_links[i].receiver_tid = 0;
         svm_links[i].assigned_lak = 0;
-        svm_links[i].last_message_time = 0; // Инициализация времени
+        svm_links[i].last_activity_time = 0; // Инициализация времени
     }
 
     printf("UVM: Загрузка конфигурации...\n");
