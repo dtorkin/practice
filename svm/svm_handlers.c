@@ -172,5 +172,33 @@ Message* handle_prinyat_ref_azimuth_message(SvmInstance *i, Message *m) { (void)
 Message* handle_prinyat_parametry_tsd_message(SvmInstance *i, Message *m) { (void)i; (void)m; printf("Processor (Inst %d): Обработка 'Принять параметры ЦДР' (нет ответа).\n", i?i->id:-1); return NULL; }
 Message* handle_navigatsionnye_dannye_message(SvmInstance *i, Message *m) { (void)i; (void)m; printf("Processor (Inst %d): Обработка 'Навигационные данные' (нет ответа).\n", i?i->id:-1); return NULL; }
 
-// --- Инициализация диспетчера (без изменений) ---
-void init_message_handlers(void) { /* ... как раньше ... */ }
+// --- Инициализация диспетчера ---
+void init_message_handlers(void) {
+	for (int i = 0; i < 256; ++i) {
+		message_handlers[i] = NULL; // Обнуляем все указатели
+	}
+	// УВМ -> СВМ (Реальные обработчики)
+	message_handlers[MESSAGE_TYPE_INIT_CHANNEL] = handle_init_channel_message;
+	message_handlers[MESSAGE_TYPE_PROVESTI_KONTROL] = handle_provesti_kontrol_message;
+	message_handlers[MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA] = handle_vydat_rezultaty_kontrolya_message;
+	message_handlers[MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII] = handle_vydat_sostoyanie_linii_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SO] = handle_prinyat_parametry_so_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_TIME_REF_RANGE] = handle_prinyat_time_ref_range_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_REPER] = handle_prinyat_reper_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_SDR] = handle_prinyat_parametry_sdr_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_3TSO] = handle_prinyat_parametry_3tso_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_REF_AZIMUTH] = handle_prinyat_ref_azimuth_message;
+	message_handlers[MESSAGE_TYPE_PRIYAT_PARAMETRY_TSD] = handle_prinyat_parametry_tsd_message;
+	message_handlers[MESSAGE_TYPE_NAVIGATSIONNYE_DANNYE] = handle_navigatsionnye_dannye_message;
+
+    // СВМ -> УВМ (Заглушки, так как SVM обычно не получает эти сообщения)
+	message_handlers[MESSAGE_TYPE_CONFIRM_INIT] = handle_confirm_init_message;
+	message_handlers[MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA] = handle_podtverzhdenie_kontrolya_message;
+	message_handlers[MESSAGE_TYPE_RESULTATY_KONTROLYA] = handle_rezultaty_kontrolya_message;
+	message_handlers[MESSAGE_TYPE_SOSTOYANIE_LINII] = handle_sostoyanie_linii_message;
+    // ... Добавить остальные заглушки для сообщений СВМ->УВМ ...
+    // message_handlers[MESSAGE_TYPE_SUBK] = handle_subk_message; // Пример
+    // ...
+
+    printf("Message handlers initialized.\n");
+}
