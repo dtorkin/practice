@@ -11,11 +11,33 @@ LDFLAGS = -pthread
 # Библиотеки
 LIBS = -lrt
 
-# --- Qt Настройки ---
-# Проверяем наличие pkg-config и Qt
-PKG_CONFIG = pkg-config
-QT_VERSION = Qt5 # или Qt6
-QT_MODULES = Widgets Gui Core Network # Добавляем Network, если будем использовать QTcpSocket и т.д.
+# --- Qt Настройки (Явное указание путей) ---
+
+# УКАЖИТЕ ЗДЕСЬ ПРАВИЛЬНЫЕ ПУТИ, ЕСЛИ ОНИ ОТЛИЧАЮТСЯ
+QT_INCLUDE_PATH = /usr/include/x86_64-linux-gnu/qt5
+QT_LIBRARY_PATH = /usr/lib/x86_64-linux-gnu
+# Путь к moc можно попытаться найти так:
+QT_MOC_PATH ?= $(shell which moc-qt5 || which moc || echo "/usr/lib/qt5/bin/moc") # Запасной путь
+
+# Флаги для включения заголовков Qt для C и C++
+QT_CFLAGS = -I$(QT_INCLUDE_PATH) \
+            -I$(QT_INCLUDE_PATH)/QtWidgets \
+            -I$(QT_INCLUDE_PATH)/QtGui \
+            -I$(QT_INCLUDE_PATH)/QtCore \
+            -I$(QT_INCLUDE_PATH)/QtNetwork # Добавляем все нужные модули
+
+# Флаги для линковки с библиотеками Qt
+QT_LDFLAGS = -L$(QT_LIBRARY_PATH)
+QT_LIBS = -lQt5Widgets -lQt5Gui -lQt5Core -lQt5Network # Указываем нужные библиотеки
+
+# Переменная для команды moc
+MOC = $(QT_MOC_PATH)
+
+# Добавляем флаги Qt к общим флагам
+CFLAGS += $(QT_CFLAGS)
+CXXFLAGS += $(QT_CFLAGS)
+LDFLAGS += $(QT_LDFLAGS) # Добавляем путь к библиотекам для линкера
+LIBS += $(QT_LIBS)      # Добавляем сами библиотеки для линкера
 
 # Получаем флаги Qt через pkg-config
 QT_CFLAGS = $(shell $(PKG_CONFIG) --cflags $(addprefix $(QT_VERSION), $(QT_MODULES)))
