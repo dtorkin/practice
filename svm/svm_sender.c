@@ -98,25 +98,36 @@ void* sender_thread_func(void* arg) {
         }
         // Если !instance_is_active, сообщение просто игнорируется
 
-        // --- Обработка после попытки отправки ---
+		// --- Обработка после попытки отправки ---
         if (send_error || limit_reached_this_time) {
-             pthread_mutex_lock(&instance->instance_mutex);
-             if (instance->is_active) { // Проверяем снова, вдруг что-то изменилось
-                  instance->is_active = false; // Помечаем неактивным
+             pthread_mutex_lock(&instance->instance_mutex); // Берем мьютекс для изменения состояния instance
+             if (instance->is_active) { // Проверяем снова, активен ли он еще
+
+                  // Сначала логируем причину деактивации
                   if (limit_reached_this_time) {
-                       printf("Sender Thread: SIMULATING disconnect for instance %d after sending message %d.\n", instance_id, instance->messages_sent_count);
+                       // ---> Сообщение об имитации отключения <---
+                       fprintf(stderr, "Sender Thread: SIMULATING disconnect for instance %d (handle %d) NOW after sending message %d.\n",
+                              instance_id, instance->client_handle, instance->messages_sent_count);
                   } else { // send_error == true
-                       printf("Sender Thread: Deactivating instance %d due to send error.\n", instance_id);
+                       fprintf(stderr, "Sender Thread: Deactivating instance %d (handle %d) due to send error.\n",
+                               instance_id, instance->client_handle);
                   }
-                  // Закрываем соединение и очередь в любом случае (достигли лимита или ошибка)
+
+                  // Теперь деактивируем и закрываем ресурсы
+                  instance->is_active = false; // Помечаем неактивным
+
+                  // Закрываем сокет, чтобы Receiver узнал
                   if (instance->client_handle >= 0) {
                       shutdown(instance->client_handle, SHUT_RDWR);
+                      // close() будет вызван в listener'е при очистке
                   }
+                  // Закрываем входящую очередь, чтобы Processor завершился
                   if (instance->incoming_queue) {
                        qmq_shutdown(instance->incoming_queue);
                   }
              }
-             pthread_mutex_unlock(&instance->instance_mutex);
+             // Если !instance->is_active, значит его уже деактивировали (возможно, Receiver или другой вызов Sender'а)
+             pthread_mutex_unlock(&instance->instance_mutex); // Отпускаем мьютекс
         }
         // --- Конец обработки ---
 
