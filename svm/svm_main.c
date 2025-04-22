@@ -388,7 +388,9 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
     try {
         QApplication app(argc, argv);
         SvmMainWindow mainWindow;
+		printf("SVM Main: Showing main window...\n"); 
         mainWindow.show();
+		printf("SVM Main: Entering Qt event loop...\n"); 
         qt_exit_code = app.exec(); // Запускаем цикл обработки событий Qt
         printf("SVM: Qt application finished with code %d.\n", qt_exit_code);
     } catch (const std::exception& e) {
