@@ -1,24 +1,28 @@
 /*
  * config/config.h
- *
- * Описание:
- * Определяет структуру для хранения конфигурации приложения
- * и объявляет функцию для загрузки конфигурации из файла.
- * (Версия для загрузки ВСЕХ настроек SVM)
+ * Описание: Определяет структуру для хранения конфигурации приложения.
+ * (Версия для загрузки ВСЕХ настроек SVM, включая параметры имитации сбоев)
  */
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <stdbool.h>    // <-- ВКЛЮЧИТЬ для bool
-#include "../io/io_interface.h" // Нужен для EthernetConfig, SerialConfig
-#include "../protocol/protocol_defs.h" // Нужен для LogicalAddress
+#include "../io/io_interface.h"
+#include "../protocol/protocol_defs.h"
+#include <stdbool.h> // <-- Добавляем для bool
 
 // Максимальное количество SVM, чьи настройки можно хранить и эмулировать
-#define MAX_SVM_CONFIGS 4 // <-- ДОБАВЛЕНО ОПРЕДЕЛЕНИЕ
+#define MAX_SVM_CONFIGS 4
 
 // Настройки, специфичные для одного SVM
 typedef struct {
     LogicalAddress lak;
+    // --- Параметры имитации сбоев ---
+    bool simulate_control_failure; // Имитировать ошибку контроля (не ОК в RSK)?
+    int disconnect_after_messages; // Отключиться после N исходящих сообщений (-1 = выкл)
+    bool simulate_response_timeout; // Имитировать задержку ответа (для таймаута UVM)?
+    bool send_warning_on_confirm;   // Отправить Предупреждение вместо ConfirmInit?
+    uint8_t warning_tks;            // Тип TKS для отправки в Предупреждении
+    // Можно добавить другие: потеря пакетов, неверный номер сообщения и т.д.
 } SvmInstanceSettings;
 
 // Настройки Ethernet для одного SVM

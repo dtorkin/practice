@@ -21,23 +21,22 @@
 // Предварительное объявление структуры очереди
 struct ThreadSafeQueuedMsgQueue;
 
-// Состояние одного экземпляра СВ-М
+// Структура для хранения состояния связи с одним SVM
 typedef struct SvmInstance {
+    // --- Основные поля (как были) ---
     int id;
     pthread_t receiver_tid;
     pthread_t processor_tid;
-    IOInterface *io_handle;
+    IOInterface *io_handle; // Указатель на IO интерфейс listener'а этого экземпляра
     int client_handle;
     bool is_active;
     LogicalAddress assigned_lak;
-
-    // Используем указатель на предварительно объявленную структуру
-    struct ThreadSafeQueuedMsgQueue *incoming_queue;
+    struct ThreadSafeQueuedMsgQueue *incoming_queue; // Используем предварительное объявление
 
     // --- Состояние, специфичное для экземпляра ---
     SVMState current_state;
-    uint16_t message_counter;
-    // --- Счетчики, специфичные для экземпляра ---
+    uint16_t message_counter; // Счетчик исходящих сообщений
+    // --- Счетчики ---
     volatile uint32_t bcb_counter;
     uint16_t link_up_changes_counter;
     uint32_t link_up_low_time_us100;
@@ -45,6 +44,15 @@ typedef struct SvmInstance {
     int link_status_timer_counter;
 
     pthread_mutex_t instance_mutex;
+
+    // --- ПОЛЯ ДЛЯ ИМИТАЦИИ СБОЕВ ---
+    bool simulate_control_failure;
+    int disconnect_after_messages; // -1 = off
+    int messages_sent_count;      // Счетчик отправленных для disconnect_after
+    bool simulate_response_timeout;
+    bool send_warning_on_confirm;
+    uint8_t warning_tks;
+    // -----------------------------------------
 
 } SvmInstance;
 

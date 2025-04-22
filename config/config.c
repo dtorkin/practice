@@ -1,52 +1,65 @@
 /*
  * config/config.c
  * Описание: Реализация функции загрузки конфигурации из INI-файла.
- * (Версия для загрузки ВСЕХ настроек SVM в массивы, использует snprintf)
+ * (Версия для загрузки ВСЕХ настроек SVM, включая параметры имитации сбоев)
  */
-#include "config.h"      // Включаем наш заголовок
+#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>     // Для strcasecmp
-#include <stdbool.h>     // Для bool
+#include <strings.h>
+#include <stdbool.h>
 #include "ini.h"
-#include "../protocol/protocol_defs.h" // Для LOGICAL_ADDRESS_*
+#include "../protocol/protocol_defs.h"
+
+// Вспомогательная функция для парсинга boolean значений из ini
+static bool parse_ini_boolean(const char* value) {
+    if (!value) return false;
+    return (strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 ||
+            strcasecmp(value, "on") == 0 ||
+            strcmp(value, "1") == 0);
+}
 
 // Обработчик для библиотеки inih
 static int config_handler(void* user, const char* section, const char* name,
                           const char* value) {
     AppConfig* pconfig = (AppConfig*)user;
     int svm_id = -1;
-    // printf("DEBUG_CONFIG: Section=[%s], Name=[%s], Value=[%s]\n", section, name, value);
 
     #define MATCH(s, n) strcasecmp(section, s) == 0 && strcasecmp(name, n) == 0
-    // Макрос MATCH_STRNCPY больше не используется
+    // snprintf используется вместо MATCH_STRNCPY
 
     // Пытаемся распознать секции для SVM
     int sscanf_res_eth = sscanf(section, "ethernet_svm%d", &svm_id);
     if (sscanf_res_eth == 1) {
-        // printf("DEBUG_CONFIG: Matched ethernet_svm%d\n", svm_id);
         if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
              if (strcasecmp(name, "port") == 0) {
                  pconfig->svm_ethernet[svm_id].port = (uint16_t)atoi(value);
-                 // Флаг svm_config_loaded устанавливается позже, в load_config
-                 // printf("DEBUG_CONFIG: Set port for SVM %d to %s\n", svm_id, value);
              }
-             // Можно добавить другие параметры для ethernet_svmX, если нужно
-             return 1; // Обработали секцию SVM
+             // Другие параметры ethernet_svmX...
+             return 1;
         }
     } else {
         int sscanf_res_set = sscanf(section, "svm_settings_%d", &svm_id);
          if (sscanf_res_set == 1) {
-             // printf("DEBUG_CONFIG: Matched svm_settings_%d\n", svm_id);
             if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
                  if (strcasecmp(name, "lak") == 0) {
-                      pconfig->svm_settings[svm_id].lak = (LogicalAddress)strtol(value, NULL, 0); // Используем strtol для поддержки hex/dec
-                     // Флаг svm_config_loaded устанавливается позже, в load_config
-                      // printf("DEBUG_CONFIG: Set LAK for SVM %d to %s\n", svm_id, value);
+                      pconfig->svm_settings[svm_id].lak = (LogicalAddress)strtol(value, NULL, 0);
+                 } else if (strcasecmp(name, "simulate_control_failure") == 0) {
+                      pconfig->svm_settings[svm_id].simulate_control_failure = parse_ini_boolean(value);
+                 } else if (strcasecmp(name, "disconnect_after_messages") == 0) {
+                      pconfig->svm_settings[svm_id].disconnect_after_messages = atoi(value);
+                 } else if (strcasecmp(name, "simulate_response_timeout") == 0) {
+                      pconfig->svm_settings[svm_id].simulate_response_timeout = parse_ini_boolean(value);
+                 } else if (strcasecmp(name, "send_warning_on_confirm") == 0) {
+                      pconfig->svm_settings[svm_id].send_warning_on_confirm = parse_ini_boolean(value);
+                 } else if (strcasecmp(name, "warning_tks") == 0) {
+                      pconfig->svm_settings[svm_id].warning_tks = (uint8_t)atoi(value);
                  }
-                  // Можно добавить другие параметры для svm_settings_X, если нужно
-                 return 1; // Обработали секцию SVM
+                 // Отмечаем, что конфиг для этого ID загружен, если ЛЮБОЙ параметр прочитан
+                 pconfig->svm_config_loaded[svm_id] = true;
+                 return 1;
             }
         }
     }
@@ -55,15 +68,11 @@ static int config_handler(void* user, const char* section, const char* name,
     if (MATCH("communication", "interface_type")) {
         snprintf(pconfig->interface_type, sizeof(pconfig->interface_type), "%s", value);
     }
-    // --- Настройки для UVM ---
     else if (MATCH("ethernet_uvm_target", "target_ip")) {
-        snprintf(pconfig->uvm_ethernet_target.target_ip,
-                 sizeof(pconfig->uvm_ethernet_target.target_ip),
-                 "%s", value);
+        snprintf(pconfig->uvm_ethernet_target.target_ip, sizeof(pconfig->uvm_ethernet_target.target_ip), "%s", value);
     } else if (MATCH("ethernet_uvm_target", "port")) {
         pconfig->uvm_ethernet_target.port = (uint16_t)atoi(value);
     }
-    // --- Настройки Serial ---
     else if (MATCH("serial", "device")) {
         snprintf(pconfig->serial.device, sizeof(pconfig->serial.device), "%s", value);
     } else if (MATCH("serial", "baud_rate")) {
@@ -86,23 +95,25 @@ static int config_handler(void* user, const char* section, const char* name,
 int load_config(const char *filename, AppConfig *config) {
     // 1. Установить значения по умолчанию
     strcpy(config->interface_type, "ethernet");
-    config->num_svm_configs_found = 0; // Сбрасываем счетчик
-
-    // Дефолты для UVM target
+    config->num_svm_configs_found = 0;
     strcpy(config->uvm_ethernet_target.target_ip, "127.0.0.1");
     config->uvm_ethernet_target.port = 8080;
-    // Дефолты для serial
     strcpy(config->serial.device, "/dev/ttyS0");
     config->serial.baud_rate = 115200;
     config->serial.data_bits = 8;
     strcpy(config->serial.parity, "none");
     config->serial.stop_bits = 1;
 
-    // Инициализируем массивы SVM "пустыми" значениями (0)
-    // и флаг загрузки в false
+    // Устанавливаем дефолты для всех слотов SVM
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-        config->svm_ethernet[i].port = 0; // 0 как признак "не загружено"
-        config->svm_settings[i].lak = 0;  // 0 как признак "не загружено"
+        config->svm_ethernet[i].port = 0; // Признак "не загружено"
+        config->svm_settings[i].lak = 0;  // Признак "не загружено"
+        // Дефолты для имитации сбоев (все выключено)
+        config->svm_settings[i].simulate_control_failure = false;
+        config->svm_settings[i].disconnect_after_messages = -1; // Выключено
+        config->svm_settings[i].simulate_response_timeout = false;
+        config->svm_settings[i].send_warning_on_confirm = false;
+        config->svm_settings[i].warning_tks = 1; // Пример TKS
         config->svm_config_loaded[i] = false;
     }
 
@@ -125,43 +136,44 @@ int load_config(const char *filename, AppConfig *config) {
         printf("Configuration parsed successfully from '%s'.\n", filename);
     }
 
-    // 4. Подсчитать, сколько конфигов SVM реально найдено и установить флаги
+    // 4. Подсчитать найденные конфиги SVM и установить дефолты, если не найдено
     config->num_svm_configs_found = 0;
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-        // Считаем конфиг найденным, если для него был прочитан порт ИЛИ LAK
-        // (и они не равны нашему "невозможному" значению 0)
-        if (config->svm_ethernet[i].port != 0 || config->svm_settings[i].lak != 0) {
+        // Проверяем флаг, установленный в config_handler
+        if (config->svm_config_loaded[i]) {
             config->num_svm_configs_found++;
-            config->svm_config_loaded[i] = true; // Устанавливаем флаг здесь
+            // Если порт или LAK не были заданы в файле (остались 0), ставим дефолт
+            if (config->svm_ethernet[i].port == 0) {
+                config->svm_ethernet[i].port = 8080 + i;
+            }
+            if (config->svm_settings[i].lak == 0) {
+                config->svm_settings[i].lak = (LogicalAddress)(0x08 + i);
+            }
         } else {
-             config->svm_config_loaded[i] = false;
+             // Если конфиг для ID не найден, все равно установим дефолтные порт/LAK
+             config->svm_ethernet[i].port = 8080 + i;
+             config->svm_settings[i].lak = (LogicalAddress)(0x08 + i);
         }
     }
-    printf("Found configurations for %d SVM instances.\n", config->num_svm_configs_found);
+    printf("Found configurations for %d SVM instances in file.\n", config->num_svm_configs_found);
 
-    // 5. Валидация и установка дефолтов для НЕ НАЙДЕННЫХ параметров SVM
+    // 5. Валидация (проверяем все слоты до MAX_SVM_CONFIGS, т.к. задали дефолты)
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-        // Проверяем только те слоты, для которых мы ожидаем найти конфиг
-        // (Хотя можно и для всех MAX_SVM_CONFIGS, чтобы задать дефолты)
-        // if (config->svm_config_loaded[i]) { // <-- Закомментируем, чтобы задать дефолты для всех
-
-             // Если порт остался 0 после парсинга (т.е. не был в файле), используем дефолт
-             if (config->svm_ethernet[i].port == 0) {
-                 config->svm_ethernet[i].port = 8080 + i; // Пример дефолта
-                 // Можно вывести warning, если нужно
-                 // fprintf(stderr, "Warning: Port for SVM %d not found. Using default %d.\n", i, config->svm_ethernet[i].port);
-             } else if (config->svm_ethernet[i].port > 65535) { // Валидация прочитанного
-                 fprintf(stderr, "Warning: Invalid port %d for SVM %d. Using default %d.\n", config->svm_ethernet[i].port, i, 8080 + i);
-                 config->svm_ethernet[i].port = 8080 + i;
-             }
-
-             // Если LAK остался 0 после парсинга, используем дефолт
-             if (config->svm_settings[i].lak == 0) { // LAK=0 не используется
-                 config->svm_settings[i].lak = (LogicalAddress)(0x08 + i); // Пример дефолта
-                 // fprintf(stderr, "Warning: LAK for SVM %d not found. Using default 0x%02X.\n", i, config->svm_settings[i].lak);
-             }
-             // Валидация LAK > 255 не нужна, т.к. тип LogicalAddress (uint8_t) это ограничивает
-        // } // <-- Конец if (config->svm_config_loaded[i])
+         // Валидация порта
+         if (config->svm_ethernet[i].port == 0 || config->svm_ethernet[i].port > 65535) {
+             fprintf(stderr, "Warning: Invalid port %d for SVM %d config slot. Using default %d.\n", config->svm_ethernet[i].port, i, 8080 + i);
+             config->svm_ethernet[i].port = 8080 + i;
+         }
+         // Валидация LAK
+         if (config->svm_settings[i].lak == 0) { // LAK=0 не используется
+             fprintf(stderr, "Warning: Invalid LAK %d for SVM %d config slot. Using default 0x%02X.\n", config->svm_settings[i].lak, i, 0x08 + i);
+             config->svm_settings[i].lak = (LogicalAddress)(0x08 + i);
+         }
+         // Валидация disconnect_after_messages
+         if (config->svm_settings[i].disconnect_after_messages == 0) {
+             // 0 бессмысленно, ставим -1 (выключено)
+             config->svm_settings[i].disconnect_after_messages = -1;
+         }
     }
     // ... (другие валидации для общих настроек, UVM, serial) ...
      if (strcasecmp(config->interface_type, "ethernet") != 0 && strcasecmp(config->interface_type, "serial") != 0) {
@@ -175,12 +187,18 @@ int load_config(const char *filename, AppConfig *config) {
     printf("  interface_type = %s\n", config->interface_type);
     printf("  UVM Target: %s:%d\n", config->uvm_ethernet_target.target_ip, config->uvm_ethernet_target.port);
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
-         // Выводим даже если не загружено, чтобы видеть дефолты
          printf("  SVM %d: Port=%d, LAK=0x%02X (Loaded: %s)\n",
                 i,
                 config->svm_ethernet[i].port,
                 config->svm_settings[i].lak,
                 config->svm_config_loaded[i] ? "Yes" : "No (Defaults)");
+         // Вывод параметров сбоев
+         if (config->svm_config_loaded[i]) { // Выводим только для найденных
+            printf("    Simulate Control Failure: %s\n", config->svm_settings[i].simulate_control_failure ? "Yes" : "No");
+            printf("    Disconnect After: %d messages\n", config->svm_settings[i].disconnect_after_messages);
+            printf("    Simulate Response Timeout: %s\n", config->svm_settings[i].simulate_response_timeout ? "Yes" : "No");
+            printf("    Send Warning on Confirm: %s (TKS: %u)\n", config->svm_settings[i].send_warning_on_confirm ? "Yes" : "No", config->svm_settings[i].warning_tks);
+         }
     }
     printf("-----------------------------\n");
 

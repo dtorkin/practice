@@ -84,13 +84,35 @@ void initialize_svm_instance(SvmInstance *instance, int id) {
     instance->receiver_tid = 0;
     instance->processor_tid = 0;
     instance->current_state = STATE_NOT_INITIALIZED;
-    instance->message_counter = 0;
+    instance->message_counter = 0; // Счетчик сообщений экземпляра
+    instance->messages_sent_count = 0; // Счетчик для disconnect
+
+    // Сброс счетчиков таймера
     instance->bcb_counter = 0;
     instance->link_up_changes_counter = 0;
     instance->link_up_low_time_us100 = 0;
     instance->sign_det_changes_counter = 0;
     instance->link_status_timer_counter = 0;
-    // Мьютекс инициализируется в main
+
+    // Копируем параметры имитации сбоев из глобальной config
+    // (предполагается, что config уже загружена)
+    if (id >= 0 && id < MAX_SVM_CONFIGS) {
+         instance->assigned_lak = config.svm_settings[id].lak; // LAK устанавливается здесь
+         instance->simulate_control_failure = config.svm_settings[id].simulate_control_failure;
+         instance->disconnect_after_messages = config.svm_settings[id].disconnect_after_messages;
+         instance->simulate_response_timeout = config.svm_settings[id].simulate_response_timeout;
+         instance->send_warning_on_confirm = config.svm_settings[id].send_warning_on_confirm;
+         instance->warning_tks = config.svm_settings[id].warning_tks;
+    } else {
+         // Установить дефолты, если ID некорректен (хотя это не должно произойти)
+         instance->assigned_lak = 0;
+         instance->simulate_control_failure = false;
+         instance->disconnect_after_messages = -1;
+         instance->simulate_response_timeout = false;
+         instance->send_warning_on_confirm = false;
+         instance->warning_tks = 0;
+    }
+     // Мьютекс инициализируется в main
 }
 
 // --- Поток-слушатель для одного порта/экземпляра ---
