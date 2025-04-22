@@ -1,0 +1,800 @@
+dtorkin@ubuntu1:~/Desktop/practice$ sudo ./uvm_app OR1
+DEBUG UVM: Got mode argument: OR1
+DEBUG UVM: Effective RadarMode selected: 128
+UVM: Загрузка конфигурации...
+Configuration parsed successfully from 'config.ini'.
+Found configurations for 4 SVM instances in file.
+--- Effective Configuration ---
+  interface_type = ethernet
+  UVM Target: 192.168.189.129:8080
+  SVM 0: Port=8080, LAK=0x08 (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: -1 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 1: Port=8081, LAK=0x09 (Loaded: Yes)
+    Simulate Control Failure: Yes
+    Disconnect After: -1 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 2: Port=8082, LAK=0x0A (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: -1 messages
+    Simulate Response Timeout: Yes
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 3: Port=8083, LAK=0x0B (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: 5 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+-----------------------------
+UVM: Found 4 SVM configurations in config file.
+Thread-safe UVM request queue created with capacity 50
+Thread-safe UVM Response queue created with capacity 200
+UVM: Connecting to SVMs...
+DEBUG UVM: IP before loop: 192.168.189.129
+UVM: Attempting to connect to SVM ID 0 (IP: 192.168.189.129, Port: 8080)...
+DEBUG UVM: Preparing to create interface for SVM 0 with IP=192.168.189.129, Port=8080
+Ethernet: Connected to 192.168.189.129:8080 (handle: 3)
+UVM: Successfully connected to SVM ID 0 (Handle: 3).
+UVM: Attempting to connect to SVM ID 1 (IP: 192.168.189.129, Port: 8081)...
+DEBUG UVM: Preparing to create interface for SVM 1 with IP=192.168.189.129, Port=8081
+Ethernet: Connected to 192.168.189.129:8081 (handle: 4)
+UVM: Successfully connected to SVM ID 1 (Handle: 4).
+UVM: Attempting to connect to SVM ID 2 (IP: 192.168.189.129, Port: 8082)...
+DEBUG UVM: Preparing to create interface for SVM 2 with IP=192.168.189.129, Port=8082
+Ethernet: Connected to 192.168.189.129:8082 (handle: 5)
+UVM: Successfully connected to SVM ID 2 (Handle: 5).
+UVM: Attempting to connect to SVM ID 3 (IP: 192.168.189.129, Port: 8083)...
+DEBUG UVM: Preparing to create interface for SVM 3 with IP=192.168.189.129, Port=8083
+Ethernet: Connected to 192.168.189.129:8083 (handle: 6)
+UVM: Successfully connected to SVM ID 3 (Handle: 6).
+UVM: Connected to 4 out of 4 configured SVMs.
+UVM: Запуск потоков Sender и Receiver(s)...
+UVM: Потоки запущены. Режим работы: 128
+
+--- Подготовка к сеансу наблюдения ---
+UVM Receiver thread started for SVM ID 0 (handle: 3).
+UVM Sender thread started.
+Отправка сообщения через Ethernet: Тип=128, Номер=0, Длина тела=2, Общий размер=8, Handle=3
+UVM Receiver thread started for SVM ID 2 (handle: 5).
+UVM Receiver thread started for SVM ID 1 (handle: 4).
+UVM Receiver thread started for SVM ID 3 (handle: 6).
+Отправка сообщения через Ethernet: Тип=1, Номер=1, Длина тела=1, Общий размер=7, Handle=3
+Отправка сообщения через Ethernet: Тип=2, Номер=2, Длина тела=1, Общий размер=7, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=3, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=128, Номер=0, Длина тела=2, Общий размер=8, Handle=4
+Отправка сообщения через Ethernet: Тип=1, Номер=1, Длина тела=1, Общий размер=7, Handle=4
+Отправка сообщения через Ethernet: Тип=2, Номер=2, Длина тела=1, Общий размер=7, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=3, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=128, Номер=0, Длина тела=2, Общий размер=8, Handle=5
+Отправка сообщения через Ethernet: Тип=1, Номер=1, Длина тела=1, Общий размер=7, Handle=5
+Отправка сообщения через Ethernet: Тип=2, Номер=2, Длина тела=1, Общий размер=7, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=3, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=128, Номер=0, Длина тела=2, Общий размер=8, Handle=6
+Отправка сообщения через Ethernet: Тип=1, Номер=1, Длина тела=1, Общий размер=7, Handle=6
+Отправка сообщения через Ethernet: Тип=2, Номер=2, Длина тела=1, Общий размер=7, Handle=6
+Отправка сообщения через Ethernet: Тип=6, Номер=3, Длина тела=0, Общий размер=6, Handle=6
+
+--- Подготовка к сеансу съемки ---
+DEBUG UVM: Mode before sending parameters: 128
+UVM Main (SVM 0): Sending OR/OR1 parameters...
+UVM Main (SVM 0): Sending NAV data...
+UVM Main (SVM 1): Sending OR/OR1 parameters...
+UVM Main (SVM 1): Sending NAV data...
+UVM Main (SVM 2): Sending OR/OR1 parameters...
+UVM Main (SVM 2): Sending NAV data...
+UVM Main (SVM 3): Sending OR/OR1 parameters...
+UVM Main (SVM 3): Sending NAV data...
+Отправка сообщения через Ethernet: Тип=160, Номер=4, Длина тела=50, Общий размер=56, Handle=3
+Отправка сообщения через Ethernet: Тип=200, Номер=5, Длина тела=316, Общий размер=322, Handle=3
+Отправка сообщения через Ethernet: Тип=161, Номер=6, Длина тела=800, Общий размер=806, Handle=3
+Отправка сообщения через Ethernet: Тип=162, Номер=7, Длина тела=24, Общий размер=30, Handle=3
+Отправка сообщения через Ethernet: Тип=255, Номер=8, Длина тела=256, Общий размер=262, Handle=3
+Отправка сообщения через Ethernet: Тип=160, Номер=4, Длина тела=50, Общий размер=56, Handle=4
+Отправка сообщения через Ethernet: Тип=200, Номер=5, Длина тела=316, Общий размер=322, Handle=4
+Отправка сообщения через Ethernet: Тип=161, Номер=6, Длина тела=800, Общий размер=806, Handle=4
+Отправка сообщения через Ethernet: Тип=162, Номер=7, Длина тела=24, Общий размер=30, Handle=4
+Отправка сообщения через Ethernet: Тип=255, Номер=8, Длина тела=256, Общий размер=262, Handle=4
+Отправка сообщения через Ethernet: Тип=160, Номер=4, Длина тела=50, Общий размер=56, Handle=5
+Отправка сообщения через Ethernet: Тип=200, Номер=5, Длина тела=316, Общий размер=322, Handle=5
+Отправка сообщения через Ethernet: Тип=161, Номер=6, Длина тела=800, Общий размер=806, Handle=5
+Отправка сообщения через Ethernet: Тип=162, Номер=7, Длина тела=24, Общий размер=30, Handle=5
+Отправка сообщения через Ethernet: Тип=255, Номер=8, Длина тела=256, Общий размер=262, Handle=5
+Отправка сообщения через Ethernet: Тип=160, Номер=4, Длина тела=50, Общий размер=56, Handle=6
+Отправка сообщения через Ethernet: Тип=200, Номер=5, Длина тела=316, Общий размер=322, Handle=6
+Отправка сообщения через Ethernet: Тип=161, Номер=6, Длина тела=800, Общий размер=806, Handle=6
+Отправка сообщения через Ethernet: Тип=162, Номер=7, Длина тела=24, Общий размер=30, Handle=6
+Отправка сообщения через Ethernet: Тип=255, Номер=8, Длина тела=256, Общий размер=262, Handle=6
+UVM: Все сообщения подготовки к съемке отправлены.
+
+--- Тест Отправки Дополнительных Команд ---
+Sending extra command batch 1/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=9, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=9, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=9, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=9, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=129, Номер=0, Длина тела=12, Handle=6
+Получено сообщение через Ethernet: Тип=129, Номер=0, Длина тела=12, Handle=3
+Получено сообщение через Ethernet: Тип=129, Номер=0, Длина тела=12, Handle=4
+Получено сообщение через Ethernet: Тип=129, Номер=0, Длина тела=12, Handle=5
+Sending extra command batch 2/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=10, Длина тела=0, Общий размер=6, Handle=3
+Получено сообщение через Ethernet: Тип=3, Номер=1, Длина тела=8, Handle=5
+Получено сообщение через Ethernet: Тип=3, Номер=1, Длина тела=8, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=10, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=10, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=10, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=4, Номер=2, Длина тела=8, Handle=5
+Получено сообщение через Ethernet: Тип=3, Номер=1, Длина тела=8, Handle=3
+Получено сообщение через Ethernet: Тип=4, Номер=2, Длина тела=8, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=3, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=4, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=3, Номер=1, Длина тела=8, Handle=6
+Получено сообщение через Ethernet: Тип=4, Номер=2, Длина тела=8, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=3, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=4, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=3, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=4, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=4, Номер=2, Длина тела=8, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=3, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=4, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=5, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=5, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=5, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=5, Длина тела=16, Handle=5
+Sending extra command batch 3/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=11, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=11, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=11, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=11, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=6, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=6, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=6, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=6, Длина тела=16, Handle=5
+Sending extra command batch 4/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=12, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=12, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=12, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=12, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=7, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=7, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=7, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=7, Длина тела=16, Handle=4
+Sending extra command batch 5/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=13, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=13, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=13, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=13, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=8, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=8, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=8, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=8, Длина тела=16, Handle=6
+Sending extra command batch 6/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=14, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=14, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=14, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=14, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=9, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=9, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=9, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=9, Длина тела=16, Handle=4
+Sending extra command batch 7/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=15, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=15, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=15, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=15, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=10, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=10, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=10, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=10, Длина тела=16, Handle=4
+Sending extra command batch 8/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=16, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=16, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=16, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=16, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=11, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=11, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=11, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=11, Длина тела=16, Handle=4
+Sending extra command batch 9/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=17, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=17, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=17, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=17, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=12, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=12, Длина тела=16, Handle=5
+Получено сообщение через Ethernet: Тип=7, Номер=12, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=12, Длина тела=16, Handle=6
+Sending extra command batch 10/10...
+Отправка сообщения через Ethernet: Тип=6, Номер=18, Длина тела=0, Общий размер=6, Handle=3
+Отправка сообщения через Ethernet: Тип=6, Номер=18, Длина тела=0, Общий размер=6, Handle=4
+Отправка сообщения через Ethernet: Тип=6, Номер=18, Длина тела=0, Общий размер=6, Handle=5
+Отправка сообщения через Ethernet: Тип=6, Номер=18, Длина тела=0, Общий размер=6, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=13, Длина тела=16, Handle=4
+Получено сообщение через Ethernet: Тип=7, Номер=13, Длина тела=16, Handle=3
+Получено сообщение через Ethernet: Тип=7, Номер=13, Длина тела=16, Handle=6
+Получено сообщение через Ethernet: Тип=7, Номер=13, Длина тела=16, Handle=5
+--- Конец Теста Отправки Дополнительных Команд ---
+UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...
+UVM Main: Received message type 129 from SVM ID 3 (Expected LAK 0x0B, Num 0)
+  Confirm Init: LAK=0x0B, BCB=0x01000000
+  LAK confirmed for SVM ID 3.
+UVM Main: Received message type 129 from SVM ID 0 (Expected LAK 0x08, Num 0)
+  Confirm Init: LAK=0x08, BCB=0x00000000
+  LAK confirmed for SVM ID 0.
+UVM Main: Received message type 129 from SVM ID 1 (Expected LAK 0x09, Num 0)
+  Confirm Init: LAK=0x09, BCB=0x01000000
+  LAK confirmed for SVM ID 1.
+UVM Main: Received message type 129 from SVM ID 2 (Expected LAK 0x0A, Num 0)
+  Confirm Init: LAK=0x0A, BCB=0x00000000
+  LAK confirmed for SVM ID 2.
+UVM Main: Received message type 3 from SVM ID 2 (Expected LAK 0x0A, Num 1)
+  Control Confirmation: LAK=0x0A, TK=0x01, BCB=0x15000000
+UVM Main: Received message type 3 from SVM ID 1 (Expected LAK 0x09, Num 1)
+  Control Confirmation: LAK=0x09, TK=0x01, BCB=0x15000000
+UVM Main: Received message type 4 from SVM ID 2 (Expected LAK 0x0A, Num 2)
+  Control Results: LAK=0x0A, RSK=0x3F, VSK=38400ms, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 3)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 4)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 3 from SVM ID 0 (Expected LAK 0x08, Num 1)
+  Control Confirmation: LAK=0x08, TK=0x01, BCB=0x15000000
+UVM Main: Received message type 3 from SVM ID 3 (Expected LAK 0x0B, Num 1)
+  Control Confirmation: LAK=0x0B, TK=0x01, BCB=0x15000000
+UVM Main: Received message type 4 from SVM ID 1 (Expected LAK 0x09, Num 2)
+  Control Results: LAK=0x09, RSK=0x3F, VSK=38400ms, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 3)
+  Line Status: LAK=0x09, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 4)
+  Line Status: LAK=0x09, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 4 from SVM ID 0 (Expected LAK 0x08, Num 2)
+  Control Results: LAK=0x08, RSK=0x3F, VSK=38400ms, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 3)
+  Line Status: LAK=0x08, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 4)
+  Line Status: LAK=0x08, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 4 from SVM ID 3 (Expected LAK 0x0B, Num 2)
+  Control Results: LAK=0x0B, RSK=0x3F, VSK=38400ms, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 3)
+  Line Status: LAK=0x0B, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 4)
+  Line Status: LAK=0x0B, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 5)
+  Line Status: LAK=0x0B, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 5)
+  Line Status: LAK=0x08, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 5)
+  Line Status: LAK=0x09, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 5)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=0, BCB=0x15000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 6)
+  Line Status: LAK=0x08, KLA=256, SLA=0 (x 1/100us), KSA=0, BCB=0x29000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 6)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x29000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 6)
+  Line Status: LAK=0x0B, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x29000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 6)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x29000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 7)
+  Line Status: LAK=0x08, KLA=256, SLA=0 (x 1/100us), KSA=0, BCB=0x3D000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 7)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x3D000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 7)
+  Line Status: LAK=0x0B, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x3D000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 7)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x3D000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 8)
+  Line Status: LAK=0x08, KLA=256, SLA=0 (x 1/100us), KSA=0, BCB=0x51000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 8)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x51000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 8)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x51000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 8)
+  Line Status: LAK=0x0B, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x51000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 9)
+  Line Status: LAK=0x0B, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x65000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 9)
+  Line Status: LAK=0x0A, KLA=0, SLA=0 (x 1/100us), KSA=256, BCB=0x65000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 9)
+  Line Status: LAK=0x08, KLA=256, SLA=0 (x 1/100us), KSA=0, BCB=0x65000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 9)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x65000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 10)
+  Line Status: LAK=0x0A, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x79000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 10)
+  Line Status: LAK=0x08, KLA=512, SLA=0 (x 1/100us), KSA=0, BCB=0x79000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 10)
+  Line Status: LAK=0x0B, KLA=512, SLA=0 (x 1/100us), KSA=512, BCB=0x79000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 10)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x79000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 11)
+  Line Status: LAK=0x0A, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x8D000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 11)
+  Line Status: LAK=0x0B, KLA=512, SLA=0 (x 1/100us), KSA=512, BCB=0x8D000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 11)
+  Line Status: LAK=0x08, KLA=512, SLA=0 (x 1/100us), KSA=0, BCB=0x8D000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 11)
+  Line Status: LAK=0x09, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0x8D000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 12)
+  Line Status: LAK=0x08, KLA=512, SLA=0 (x 1/100us), KSA=256, BCB=0xA1000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 12)
+  Line Status: LAK=0x0A, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0xA1000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 12)
+  Line Status: LAK=0x09, KLA=512, SLA=0 (x 1/100us), KSA=256, BCB=0xA1000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 12)
+  Line Status: LAK=0x0B, KLA=768, SLA=0 (x 1/100us), KSA=512, BCB=0xA1000000
+UVM Main: Received message type 7 from SVM ID 1 (Expected LAK 0x09, Num 13)
+  Line Status: LAK=0x09, KLA=512, SLA=0 (x 1/100us), KSA=256, BCB=0xB5000000
+UVM Main: Received message type 7 from SVM ID 0 (Expected LAK 0x08, Num 13)
+  Line Status: LAK=0x08, KLA=512, SLA=0 (x 1/100us), KSA=256, BCB=0xB5000000
+UVM Main: Received message type 7 from SVM ID 3 (Expected LAK 0x0B, Num 13)
+  Line Status: LAK=0x0B, KLA=768, SLA=0 (x 1/100us), KSA=512, BCB=0xB5000000
+UVM Main: Received message type 7 from SVM ID 2 (Expected LAK 0x0A, Num 13)
+  Line Status: LAK=0x0A, KLA=256, SLA=0 (x 1/100us), KSA=256, BCB=0xB5000000
+^C
+UVM: Received shutdown signal. Exiting...
+Thread-safe UVM request queue shutdown initiated.
+Thread-safe UVM Response queue shutdown initiated.
+UVM Main: Response queue shut down. Exiting loop.
+UVM: Завершение работы и очистка ресурсов...
+Ethernet: Closing handle 3
+Ethernet Interface destroyed.
+Ethernet: Closing handle 4
+Ethernet Interface destroyed.
+Ethernet: Closing handle 5
+Ethernet Interface destroyed.
+Ethernet: Closing handle 6
+Sender Thread: Request queue empty and shutdown signaled. Exiting.
+UVM Sender thread finished.
+Ethernet Interface destroyed.
+Thread-safe UVM request queue destroyed
+Thread-safe UVM Response queue destroyed
+UVM: Очистка завершена.
+
+
+dtorkin@ubuntu1:~/Desktop/practice$ sudo ./svm_app
+SVM Multi-Port Server starting...
+Message handlers initialized.
+SVM: Loading configuration...
+Configuration parsed successfully from 'config.ini'.
+Found configurations for 4 SVM instances in file.
+--- Effective Configuration ---
+  interface_type = ethernet
+  UVM Target: 192.168.189.129:8080
+  SVM 0: Port=8080, LAK=0x08 (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: -1 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 1: Port=8081, LAK=0x09 (Loaded: Yes)
+    Simulate Control Failure: Yes
+    Disconnect After: -1 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 2: Port=8082, LAK=0x0A (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: -1 messages
+    Simulate Response Timeout: Yes
+    Send Warning on Confirm: No (TKS: 1)
+  SVM 3: Port=8083, LAK=0x0B (Loaded: Yes)
+    Simulate Control Failure: No
+    Disconnect After: 5 messages
+    Simulate Response Timeout: No
+    Send Warning on Confirm: No (TKS: 1)
+-----------------------------
+SVM: Will attempt to start 4 instances based on config.
+Thread-safe QueuedMessage queue created with capacity 400
+SVM: Listener thread 0 initiated for Port 8080 (LAK 0x08).
+Ethernet: Listening on port 8080 (handle: 3)
+Listener thread started for SVM ID 0 (LAK 0x08, Port 8080, Listen FD 3)
+Listener (SVM 0): Waiting for connection on port 8080...
+SVM: Listener thread 1 initiated for Port 8081 (LAK 0x09).
+SVM: Listener thread 2 initiated for Port 8082 (LAK 0x0A).
+SVM: Listener thread 3 initiated for Port 8083 (LAK 0x0B).
+SVM: Starting common threads (Timer, Sender)...
+SVM: All common threads started. 4 listeners active. Running...
+SVM Main: Waiting for shutdown signal...
+Ethernet: Listening on port 8082 (handle: 6)
+Listener thread started for SVM ID 2 (LAK 0x0A, Port 8082, Listen FD 6)
+Listener (SVM 2): Waiting for connection on port 8082...
+SVM Timer thread started.
+SVM Sender thread started (reads global outgoing queue).
+Ethernet: Listening on port 8081 (handle: 4)
+Listener thread started for SVM ID 1 (LAK 0x09, Port 8081, Listen FD 4)
+Listener (SVM 1): Waiting for connection on port 8081...
+Ethernet: Listening on port 8083 (handle: 7)
+Listener thread started for SVM ID 3 (LAK 0x0B, Port 8083, Listen FD 7)
+Listener (SVM 3): Waiting for connection on port 8083...
+Listener (SVM 0): Accepted connection from 192.168.189.128:60992 (Client FD 5)
+Thread-safe QueuedMessage queue created with capacity 100
+Listener (SVM 0): Instance activated. Worker threads started.
+SVM Receiver thread started for instance 0 (handle: 5).
+SVM Processor thread started for instance 0.
+Listener (SVM 1): Accepted connection from 192.168.189.128:46274 (Client FD 9)
+Thread-safe QueuedMessage queue created with capacity 100
+Listener (SVM 1): Instance activated. Worker threads started.
+Listener (SVM 2): Accepted connection from 192.168.189.128:56048 (Client FD 8)
+Thread-safe QueuedMessage queue created with capacity 100
+Listener (SVM 2): Instance activated. Worker threads started.
+SVM Receiver thread started for instance 1 (handle: 9).
+SVM Processor thread started for instance 1.
+Listener (SVM 3): Accepted connection from 192.168.189.128:46486 (Client FD 10)
+Thread-safe QueuedMessage queue created with capacity 100
+Listener (SVM 3): Instance activated. Worker threads started.
+SVM Processor thread started for instance 3.
+SVM Receiver thread started for instance 3 (handle: 10).
+SVM Receiver thread started for instance 2 (handle: 8).
+SVM Processor thread started for instance 2.
+Получено сообщение через Ethernet: Тип=128, Номер=0, Длина тела=2, Handle=8
+Processor (Inst 2): Обработка 'Инициализация канала'
+  Параметры: LAUVM=0x1, LAK=0x0A (assigned)
+  SVM (Inst 2): Эмуляция выключения лазера...
+  Ответ 'Подтверждение инициализации' сформирован (LAK=0x0A).
+Получено сообщение через Ethernet: Тип=128, Номер=0, Длина тела=2, Handle=5
+Получено сообщение через Ethernet: Тип=1, Номер=1, Длина тела=1, Handle=5
+Получено сообщение через Ethernet: Тип=1, Номер=1, Длина тела=1, Handle=8
+Получено сообщение через Ethernet: Тип=2, Номер=2, Длина тела=1, Handle=8
+Получено сообщение через Ethernet: Тип=2, Номер=2, Длина тела=1, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=3, Длина тела=0, Handle=8
+Отправка сообщения через Ethernet: Тип=129, Номер=0, Длина тела=12, Общий размер=18, Handle=8
+Получено сообщение через Ethernet: Тип=128, Номер=0, Длина тела=2, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=3, Длина тела=0, Handle=5
+Получено сообщение через Ethernet: Тип=160, Номер=4, Длина тела=50, Handle=5
+Processor (Inst 0): Обработка 'Инициализация канала'
+  Параметры: LAUVM=0x1, LAK=0x08 (assigned)
+  SVM (Inst 0): Эмуляция выключения лазера...
+Получено сообщение через Ethernet: Тип=1, Номер=1, Длина тела=1, Handle=9
+Processor (Inst 2): Обработка 'Провести контроль'
+Получено сообщение через Ethernet: Тип=128, Номер=0, Длина тела=2, Handle=10
+Получено сообщение через Ethernet: Тип=1, Номер=1, Длина тела=1, Handle=10
+Получено сообщение через Ethernet: Тип=2, Номер=2, Длина тела=1, Handle=10
+Получено сообщение через Ethernet: Тип=6, Номер=3, Длина тела=0, Handle=10
+Processor (Inst 1): Обработка 'Инициализация канала'
+  Параметры: LAUVM=0x1, LAK=0x09 (assigned)
+  SVM (Inst 1): Эмуляция выключения лазера...
+Processor (Inst 3): Обработка 'Инициализация канала'
+  Параметры: LAUVM=0x1, LAK=0x0B (assigned)
+  SVM (Inst 3): Эмуляция выключения лазера...
+  Ответ 'Подтверждение инициализации' сформирован (LAK=0x09).
+  Ответ 'Подтверждение инициализации' сформирован (LAK=0x08).
+  SVM (Inst 2): Эмуляция самопроверки...
+Processor (Inst 1): Обработка 'Провести контроль'
+  SVM (Inst 1): Эмуляция самопроверки...
+Получено сообщение через Ethernet: Тип=160, Номер=4, Длина тела=50, Handle=10
+Получено сообщение через Ethernet: Тип=2, Номер=2, Длина тела=1, Handle=9
+  Ответ 'Подтверждение инициализации' сформирован (LAK=0x0B).
+Получено сообщение через Ethernet: Тип=6, Номер=3, Длина тела=0, Handle=9
+Отправка сообщения через Ethernet: Тип=129, Номер=0, Длина тела=12, Общий размер=18, Handle=9
+Получено сообщение через Ethernet: Тип=160, Номер=4, Длина тела=50, Handle=8
+Отправка сообщения через Ethernet: Тип=129, Номер=0, Длина тела=12, Общий размер=18, Handle=5
+Получено сообщение через Ethernet: Тип=160, Номер=4, Длина тела=50, Handle=9
+Отправка сообщения через Ethernet: Тип=129, Номер=0, Длина тела=12, Общий размер=18, Handle=10
+Processor (Inst 3): Обработка 'Провести контроль'
+Processor (Inst 0): Обработка 'Провести контроль'
+  SVM (Inst 0): Эмуляция самопроверки...
+  SVM (Inst 3): Эмуляция самопроверки...
+Получено сообщение через Ethernet: Тип=200, Номер=5, Длина тела=316, Handle=5
+Получено сообщение через Ethernet: Тип=200, Номер=5, Длина тела=316, Handle=9
+Получено сообщение через Ethernet: Тип=161, Номер=6, Длина тела=800, Handle=5
+Получено сообщение через Ethernet: Тип=161, Номер=6, Длина тела=800, Handle=9
+Получено сообщение через Ethernet: Тип=162, Номер=7, Длина тела=24, Handle=9
+Получено сообщение через Ethernet: Тип=200, Номер=5, Длина тела=316, Handle=10
+Получено сообщение через Ethernet: Тип=162, Номер=7, Длина тела=24, Handle=5
+Получено сообщение через Ethernet: Тип=161, Номер=6, Длина тела=800, Handle=10
+Получено сообщение через Ethernet: Тип=255, Номер=8, Длина тела=256, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=9, Длина тела=0, Handle=5
+Получено сообщение через Ethernet: Тип=162, Номер=7, Длина тела=24, Handle=10
+Получено сообщение через Ethernet: Тип=255, Номер=8, Длина тела=256, Handle=10
+Получено сообщение через Ethernet: Тип=6, Номер=9, Длина тела=0, Handle=10
+Получено сообщение через Ethernet: Тип=255, Номер=8, Длина тела=256, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=9, Длина тела=0, Handle=9
+Получено сообщение через Ethernet: Тип=200, Номер=5, Длина тела=316, Handle=8
+Получено сообщение через Ethernet: Тип=161, Номер=6, Длина тела=800, Handle=8
+Получено сообщение через Ethernet: Тип=162, Номер=7, Длина тела=24, Handle=8
+Получено сообщение через Ethernet: Тип=255, Номер=8, Длина тела=256, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=9, Длина тела=0, Handle=8
+  Ответ 'Подтверждение контроля' сформирован.
+Processor (Inst 2): Обработка 'Выдать результаты контроля'
+Отправка сообщения через Ethernet: Тип=3, Номер=1, Длина тела=8, Общий размер=14, Handle=8
+  Ответ 'Подтверждение контроля' сформирован.
+Processor (Inst 1): Обработка 'Выдать результаты контроля'
+Отправка сообщения через Ethernet: Тип=3, Номер=1, Длина тела=8, Общий размер=14, Handle=9
+  Ответ 'Результаты контроля' сформирован.
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 1): Обработка 'Принять параметры СО' (нет ответа).
+Processor (Inst 1): Обработка 'Принять параметры 3ЦО' (нет ответа).
+Processor (Inst 1): Обработка 'Принять TIME_REF_RANGE' (нет ответа).
+Processor (Inst 1): Обработка 'Принять Reper' (нет ответа).
+Processor (Inst 1): Обработка 'Навигационные данные' (нет ответа).
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+  Ответ 'Результаты контроля' сформирован.
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 2): Обработка 'Принять параметры СО' (нет ответа).
+Processor (Inst 2): Обработка 'Принять параметры 3ЦО' (нет ответа).
+Processor (Inst 2): Обработка 'Принять TIME_REF_RANGE' (нет ответа).
+Processor (Inst 2): Обработка 'Принять Reper' (нет ответа).
+Processor (Inst 2): Обработка 'Навигационные данные' (нет ответа).
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+  Ответ 'Подтверждение контроля' сформирован.
+Processor (Inst 0): Обработка 'Выдать результаты контроля'
+  Ответ 'Результаты контроля' сформирован.
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 0): Обработка 'Принять параметры СО' (нет ответа).
+Processor (Inst 0): Обработка 'Принять параметры 3ЦО' (нет ответа).
+Отправка сообщения через Ethernet: Тип=4, Номер=2, Длина тела=8, Общий размер=14, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=3, Длина тела=16, Общий размер=22, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=4, Длина тела=16, Общий размер=22, Handle=9
+Отправка сообщения через Ethernet: Тип=4, Номер=2, Длина тела=8, Общий размер=14, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=3, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=4, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=3, Номер=1, Длина тела=8, Общий размер=14, Handle=5
+Отправка сообщения через Ethernet: Тип=4, Номер=2, Длина тела=8, Общий размер=14, Handle=5
+Отправка сообщения через Ethernet: Тип=7, Номер=3, Длина тела=16, Общий размер=22, Handle=5
+Processor (Inst 0): Обработка 'Принять TIME_REF_RANGE' (нет ответа).
+Processor (Inst 0): Обработка 'Принять Reper' (нет ответа).
+Processor (Inst 0): Обработка 'Навигационные данные' (нет ответа).
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Подтверждение контроля' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=10, Длина тела=0, Handle=9
+Processor (Inst 3): Обработка 'Выдать результаты контроля'
+  Ответ 'Результаты контроля' сформирован.
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 3): Обработка 'Принять параметры СО' (нет ответа).
+Processor (Inst 3): Обработка 'Принять параметры 3ЦО' (нет ответа).
+Processor (Inst 3): Обработка 'Принять TIME_REF_RANGE' (нет ответа).
+Processor (Inst 3): Обработка 'Принять Reper' (нет ответа).
+Processor (Inst 3): Обработка 'Навигационные данные' (нет ответа).
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=10, Длина тела=0, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=10, Длина тела=0, Handle=8
+Отправка сообщения через Ethernet: Тип=3, Номер=1, Длина тела=8, Общий размер=14, Handle=10
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=10, Длина тела=0, Handle=10
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=4, Номер=2, Длина тела=8, Общий размер=14, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=3, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=4, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=5, Длина тела=16, Общий размер=22, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=5, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=5, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=4, Длина тела=16, Общий размер=22, Handle=5
+Отправка сообщения через Ethernet: Тип=7, Номер=5, Длина тела=16, Общий размер=22, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=11, Длина тела=0, Handle=5
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=11, Длина тела=0, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=6, Длина тела=16, Общий размер=22, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=11, Длина тела=0, Handle=8
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=11, Длина тела=0, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=6, Длина тела=16, Общий размер=22, Handle=9
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=6, Длина тела=16, Общий размер=22, Handle=10
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=6, Длина тела=16, Общий размер=22, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=12, Длина тела=0, Handle=5
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+Получено сообщение через Ethernet: Тип=6, Номер=12, Длина тела=0, Handle=8
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=12, Длина тела=0, Handle=10
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+Получено сообщение через Ethernet: Тип=6, Номер=12, Длина тела=0, Handle=9
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=7, Длина тела=16, Общий размер=22, Handle=5
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=7, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=7, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=7, Длина тела=16, Общий размер=22, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=13, Длина тела=0, Handle=5
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=13, Длина тела=0, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=13, Длина тела=0, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=8, Длина тела=16, Общий размер=22, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=13, Длина тела=0, Handle=9
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=8, Длина тела=16, Общий размер=22, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=8, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=8, Длина тела=16, Общий размер=22, Handle=10
+Получено сообщение через Ethernet: Тип=6, Номер=14, Длина тела=0, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=14, Длина тела=0, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=14, Длина тела=0, Handle=5
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+Получено сообщение через Ethernet: Тип=6, Номер=14, Длина тела=0, Handle=10
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=9, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=9, Длина тела=16, Общий размер=22, Handle=5
+Отправка сообщения через Ethernet: Тип=7, Номер=9, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=9, Длина тела=16, Общий размер=22, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=15, Длина тела=0, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=15, Длина тела=0, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=15, Длина тела=0, Handle=9
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=15, Длина тела=0, Handle=10
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=10, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=10, Длина тела=16, Общий размер=22, Handle=5
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=10, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=10, Длина тела=16, Общий размер=22, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=16, Длина тела=0, Handle=5
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=16, Длина тела=0, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=16, Длина тела=0, Handle=9
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=11, Длина тела=16, Общий размер=22, Handle=5
+Получено сообщение через Ethernet: Тип=6, Номер=16, Длина тела=0, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=11, Длина тела=16, Общий размер=22, Handle=8
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=11, Длина тела=16, Общий размер=22, Handle=10
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=11, Длина тела=16, Общий размер=22, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=17, Длина тела=0, Handle=5
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=17, Длина тела=0, Handle=8
+Получено сообщение через Ethernet: Тип=6, Номер=17, Длина тела=0, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=12, Длина тела=16, Общий размер=22, Handle=5
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=17, Длина тела=0, Handle=10
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=12, Длина тела=16, Общий размер=22, Handle=8
+Отправка сообщения через Ethernet: Тип=7, Номер=12, Длина тела=16, Общий размер=22, Handle=9
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=12, Длина тела=16, Общий размер=22, Handle=10
+Получено сообщение через Ethernet: Тип=6, Номер=18, Длина тела=0, Handle=9
+Получено сообщение через Ethernet: Тип=6, Номер=18, Длина тела=0, Handle=10
+Получено сообщение через Ethernet: Тип=6, Номер=18, Длина тела=0, Handle=5
+Processor (Inst 1): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 0): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Получено сообщение через Ethernet: Тип=6, Номер=18, Длина тела=0, Handle=8
+Processor (Inst 3): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Processor (Inst 2): Обработка 'Выдать состояние линии'
+  Ответ 'Состояние линии' сформирован.
+Отправка сообщения через Ethernet: Тип=7, Номер=13, Длина тела=16, Общий размер=22, Handle=9
+Отправка сообщения через Ethernet: Тип=7, Номер=13, Длина тела=16, Общий размер=22, Handle=5
+Отправка сообщения через Ethernet: Тип=7, Номер=13, Длина тела=16, Общий размер=22, Handle=10
+Отправка сообщения через Ethernet: Тип=7, Номер=13, Длина тела=16, Общий размер=22, Handle=8
+receive_protocol_message: Соединение закрыто при чтении заголовка.
+Receiver Thread (Inst 0): Connection closed by UVM. Stopping instance.
+Receiver Thread (Inst 0): Marked instance as inactive.
+Receiver Thread (Inst 0): Shutting down incoming queue.
+Thread-safe QueuedMessage queue shutdown initiated.
+SVM Receiver thread finished for instance 0.
+receive_protocol_message: Соединение закрыто при чтении заголовка.
+Receiver Thread (Inst 1): Connection closed by UVM. Stopping instance.
+Receiver Thread (Inst 1): Marked instance as inactive.
+Receiver Thread (Inst 1): Shutting down incoming queue.
+receive_protocol_message: Соединение закрыто при чтении заголовка.
+Receiver Thread (Inst 3): Connection closed by UVM. Stopping instance.
+Receiver Thread (Inst 3): Marked instance as inactive.
+Receiver Thread (Inst 3): Shutting down incoming queue.
+Thread-safe QueuedMessage queue shutdown initiated.
+receive_protocol_message: Соединение закрыто при чтении заголовка.
+SVM Receiver thread finished for instance 3.
+Listener (SVM 0): Receiver thread joined.
+Receiver Thread (Inst 2): Connection closed by UVM. Stopping instance.
+Receiver Thread (Inst 2): Marked instance as inactive.
+Receiver Thread (Inst 2): Shutting down incoming queue.
+Thread-safe QueuedMessage queue shutdown initiated.
+SVM Receiver thread finished for instance 2.
+Listener (SVM 2): Receiver thread joined.
+Listener (SVM 3): Receiver thread joined.
+Processor Thread (Inst 2): Incoming queue empty and shutdown. Exiting.
+SVM Processor thread finished for instance 2.
+Listener (SVM 2): Processor thread joined.
+Listener (SVM 2): Worker threads finished. Cleaning up instance...
+Ethernet: Closing handle 8
+Processor Thread (Inst 3): Incoming queue empty and shutdown. Exiting.
+SVM Processor thread finished for instance 3.
+Listener (SVM 3): Processor thread joined.
+Listener (SVM 3): Worker threads finished. Cleaning up instance...
+Ethernet: Closing handle 10
+Processor Thread (Inst 0): Incoming queue empty and shutdown. Exiting.
+SVM Processor thread finished for instance 0.
+Thread-safe QueuedMessage queue destroyed
+Listener (SVM 2): Instance deactivated. Ready for new connection.
+Listener (SVM 2): Waiting for connection on port 8082...
+Thread-safe QueuedMessage queue shutdown initiated.
+SVM Receiver thread finished for instance 1.
+Thread-safe QueuedMessage queue destroyed
+Processor Thread (Inst 1): Incoming queue empty and shutdown. Exiting.
+Listener (SVM 3): Instance deactivated. Ready for new connection.
+Listener (SVM 3): Waiting for connection on port 8083...
+SVM Processor thread finished for instance 1.
+Listener (SVM 0): Processor thread joined.
+Listener (SVM 0): Worker threads finished. Cleaning up instance...
+Ethernet: Closing handle 5
+Listener (SVM 1): Receiver thread joined.
+Listener (SVM 1): Processor thread joined.
+Listener (SVM 1): Worker threads finished. Cleaning up instance...
+Ethernet: Closing handle 9
+Thread-safe QueuedMessage queue destroyed
+Listener (SVM 0): Instance deactivated. Ready for new connection.
+Listener (SVM 0): Waiting for connection on port 8080...
+Thread-safe QueuedMessage queue destroyed
+Listener (SVM 1): Instance deactivated. Ready for new connection.
+Listener (SVM 1): Waiting for connection on port 8081...
+^C
+SVM: Received shutdown signal. Shutting down all listeners and instances...
+ethernet_accept: Accept failed: Invalid argument
+Listener (SVM 3): Accept loop interrupted or socket closed.
+Listener thread for SVM ID 3 finished.
+Ethernet Interface destroyed.
+ethernet_accept: Accept failed: Invalid argument
+Listener (SVM 2): Accept loop interrupted or socket closed.
+Listener thread for SVM ID 2 finished.
+Ethernet Interface destroyed.
+ethernet_accept: Accept failed: Invalid argument
+Listener (SVM 0): Accept loop interrupted or socket closed.
+Listener thread for SVM ID 0 finished.
+Ethernet Interface destroyed.
+Listener (SVM 1): Accept loop interrupted or socket closed.
+Listener thread for SVM ID 1 finished.
+Ethernet Interface destroyed.
+Thread-safe QueuedMessage queue shutdown initiated.
+Timer thread stop signaled.
+SVM Main: Shutdown initiated. Waiting for threads to join...
+Timer thread stop signaled.
+SVM Timer thread stopped.
+SVM Main: Timer thread joined.
+SVM Main: Waiting for listener threads to join...
+SVM Main: Listener thread for SVM ID 0 joined.
+SVM Main: Listener thread for SVM ID 1 joined.
+SVM Main: Listener thread for SVM ID 2 joined.
+SVM Main: Listener thread for SVM ID 3 joined.
+SVM Main: All listener threads joined.
+SVM Sender thread finished.
+SVM Main: Sender thread joined.
+SVM: Cleaning up queues...
+Thread-safe QueuedMessage queue destroyed
+SVM: Cleaning up synchronization primitives...
+SVM: Cleanup finished. Exiting.
