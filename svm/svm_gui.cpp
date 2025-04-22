@@ -10,11 +10,11 @@
 // Для доступа к функциям pthread_mutex
 #include <pthread.h>
 
-// Определяем глобальные переменные из C кода как extern "C"
+// Объявляем глобальные переменные из C кода как ВНЕШНИЕ (extern)
 extern "C" {
-    // Повторяем объявления extern, чтобы линкер их нашел
-    SvmInstance svm_instances[MAX_SVM_INSTANCES];
-    pthread_mutex_t svm_instances_mutex;
+    // Используем 'extern', чтобы НЕ создавать новые переменные здесь
+    extern SvmInstance svm_instances[MAX_SVM_INSTANCES];
+    extern pthread_mutex_t svm_instances_mutex;
     // extern pthread_mutex_t svm_counters_mutex; // Если используется
 }
 
