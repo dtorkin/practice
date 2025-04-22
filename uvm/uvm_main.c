@@ -363,6 +363,33 @@ int main(int argc, char *argv[]) {
     wait_for_outstanding_sends();
     printf("UVM: Все сообщения подготовки к съемке отправлены.\n");
 
+
+// ###################################################################################
+	printf("\n--- Тест Отправки Дополнительных Команд ---\n");
+	int extra_commands_to_send = 10; // Отправим еще 10 команд каждому
+	for (int cmd_count = 0; cmd_count < extra_commands_to_send; ++cmd_count) {
+		if (!uvm_keep_running) break; // Выходим, если пришел сигнал
+		printf("Sending extra command batch %d/%d...\n", cmd_count + 1, extra_commands_to_send);
+		for (int i = 0; i < num_svms_in_config; ++i) {
+			pthread_mutex_lock(&uvm_links_mutex);
+			bool should_send = (svm_links[i].status == UVM_LINK_ACTIVE);
+			LogicalAddress current_lak = svm_links[i].assigned_lak;
+			pthread_mutex_unlock(&uvm_links_mutex);
+
+			if (should_send) {
+				request.target_svm_id = i;
+				// Отправляем "Выдать состояние линии"
+				request.message = create_vydat_sostoyanie_linii_message(current_lak, msg_counters[i]++); // Инкрементируем номер
+				send_uvm_request(&request);
+			}
+		}
+		wait_for_outstanding_sends(); // Ждем отправки этой пачки
+		sleep(1); // Небольшая пауза между пачками
+	}
+	printf("--- Конец Теста Отправки Дополнительных Команд ---\n");
+// ###################################################################################
+
+
     // --- Ожидание ответов и завершения ---
     printf("UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...\n");
     UvmResponseMessage response;
