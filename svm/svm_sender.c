@@ -18,7 +18,7 @@
 
 // Внешние глобальные переменные
 extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue;
-extern SvmInstance svm_instances[MAX_SVM_CONFIGS];
+extern SvmInstance svm_instances[MAX_SVM_INSTANCES];
 extern volatile bool keep_running;
 extern pthread_mutex_t svm_instances_mutex;
 
@@ -45,7 +45,7 @@ void* sender_thread_func(void* arg) {
         int current_sent_count = 0;
         int disconnect_threshold = -1;
 
-        if (instance_id >= 0 && instance_id < MAX_SVM_CONFIGS) {
+        if (instance_id >= 0 && instance_id < MAX_SVM_INSTANCES) {
             instance = &svm_instances[instance_id];
             pthread_mutex_lock(&instance->instance_mutex); // Блокируем экземпляр
 
