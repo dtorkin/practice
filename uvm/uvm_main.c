@@ -233,7 +233,6 @@ int main(int argc, char *argv[]) {
         }
     }
     pthread_mutex_unlock(&uvm_links_mutex);
-    // if (!uvm_keep_running) goto cleanup_threads; // Не выходим, даже если не все receiver'ы стартанули
     printf("UVM: Потоки запущены. Режим работы: %d\n", mode); // Используем mode, а не его строковое представление
 
     // --- Основная логика UVM ---
@@ -470,7 +469,7 @@ int main(int argc, char *argv[]) {
                          break;
                     }
                     case MESSAGE_TYPE_SOSTOYANIE_LINII: {
-                        SostoyanieLiniiBody *body = (SostoyanieLiniiBody *)message->body;
+                        SostoyanieLiniiBody *body = (SostoyanieLiniiBody *)msg->body;
                         uint16_t kla_host = ntohs(body->kla);
                         uint32_t sla_host = ntohl(body->sla);
                         uint16_t ksa_host = ntohs(body->ksa);
@@ -533,49 +532,6 @@ int main(int argc, char *argv[]) {
         }
 
     } // end while (uvm_keep_running)
-
-
-cleanup_threads:
-    printf("UVM: Инициируем завершение потоков...\n");
-    uvm_keep_running = false; // Убедимся, что флаг установлен
-    // Сигналим очередям
-    if (uvm_outgoing_request_queue) {
-        UvmRequest shutdown_req = {.type = UVM_REQ_SHUTDOWN};
-        // Пытаемся добавить, но если очередь закрыта - не страшно
-        queue_req_enqueue(uvm_outgoing_request_queue, &shutdown_req);
-        queue_req_shutdown(uvm_outgoing_request_queue);
-    }
-    if (uvm_incoming_response_queue) uvq_shutdown(uvm_incoming_response_queue);
-
-    // Сигналим условию ожидания
-    pthread_mutex_lock(&uvm_send_counter_mutex);
-    uvm_outstanding_sends = 0;
-    pthread_cond_broadcast(&uvm_all_sent_cond);
-    pthread_mutex_unlock(&uvm_send_counter_mutex);
-
-    // Закрываем сокеты, чтобы разбудить Receiver'ов
-    printf("UVM: Shutting down connections...\n"); // Добавлен лог
-    pthread_mutex_lock(&uvm_links_mutex);
-    for(int i=0; i<num_svms_in_config; ++i) {
-        if(svm_links[i].connection_handle >= 0) {
-             shutdown(svm_links[i].connection_handle, SHUT_RDWR);
-        }
-    }
-    pthread_mutex_unlock(&uvm_links_mutex);
-
-
-    // Ожидаем завершения потоков
-    printf("UVM: Ожидание завершения потоков...\n");
-    if (sender_tid != 0) pthread_join(sender_tid, NULL);
-    printf("UVM: Sender thread joined.\n");
-    for (int i = 0; i < num_svms_in_config; ++i) {
-        if (svm_links[i].receiver_tid != 0) {
-            pthread_join(svm_links[i].receiver_tid, NULL);
-            //printf("UVM: Receiver thread for SVM ID %d joined.\n", i);
-        }
-    }
-    printf("UVM: All receiver threads joined.\n");
-
 
 cleanup_connections:
     printf("UVM: Завершение работы и очистка ресурсов...\n");
