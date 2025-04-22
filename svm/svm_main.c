@@ -42,7 +42,7 @@ SvmInstance svm_instances[MAX_SVM_INSTANCES];
 ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;
 pthread_mutex_t svm_instances_mutex;
 int listen_sockets[MAX_SVM_INSTANCES];
-pthread_t listener_threads[MAX_SVM_CONFIGS]; // Используем MAX_SVM_CONFIGS для согласованности с config
+pthread_t listener_threads[MAX_SVM_INSTANCES]; // Используем MAX_SVM_INSTANCES для согласованности с config
 volatile bool keep_running = true;
 
 // --- Прототипы потоков ---
@@ -383,7 +383,7 @@ cleanup_gui: // Метка для очистки GUI объектов
     printf("SVM Main: Initiating shutdown of background threads...\n");
 
     // Закрываем сокеты и сигналим очередям/таймеру (как в handle_shutdown_signal)
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         int fd = listen_sockets[i];
         if (fd >= 0) { listen_sockets[i] = -1; shutdown(fd, SHUT_RDWR); close(fd); }
     }
@@ -400,7 +400,7 @@ cleanup_timer:
     }
 cleanup_listeners:
     printf("SVM Main: Waiting for listener threads to join...\n");
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         if (listener_threads[i] != 0) {
             pthread_join(listener_threads[i], NULL);
              // printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
@@ -418,7 +418,7 @@ cleanup_queues:
 cleanup_sync:
     printf("SVM: Cleaning up synchronization primitives...\n");
     destroy_svm_timer_sync();
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         pthread_mutex_destroy(&svm_instances[i].instance_mutex);
     }
     pthread_mutex_destroy(&svm_instances_mutex);
