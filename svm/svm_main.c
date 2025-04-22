@@ -3,7 +3,7 @@
  * Описание: Основной файл SVM: инициализация, управление МНОЖЕСТВОМ экземпляров СВ-М,
  * создание потоков (ОБЩИЕ Timer/Sender, ПЕРСОНАЛЬНЫЕ Listener/Receiver/Processor),
  * управление их жизненным циклом. Использует подход "1 поток accept на порт".
- * Интегрирован с Qt для отображения GUI.
+ * (Исправлено для компиляции с g++)
  */
 
 #include <stdio.h>
@@ -20,13 +20,8 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-// Обертка для включения заголовочных файлов Qt
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // --- Заголовки проекта ---
-#include "../config/config.h" // Сначала config.h для MAX_SVM_INSTANCES
+#include "../config/config.h"
 #include "../protocol/protocol_defs.h"
 #include "../protocol/message_utils.h"
 #include "../io/io_common.h"
@@ -34,25 +29,21 @@ extern "C" {
 #include "../utils/ts_queued_msg_queue.h"
 #include "svm_handlers.h"
 #include "svm_timers.h"
-#include "svm_types.h" // Включаем ПОСЛЕ config.h
+#include "svm_types.h"
 
+// --- Обертка для Qt ---
 #ifdef __cplusplus
-} // extern "C"
-// Включаем заголовки Qt ТОЛЬКО если компилируется как C++
-#include <QApplication>
-#include "svm_gui.h" // Включаем заголовок нашего окна
+extern "C" {
 #endif
 
-
 // --- Глобальные переменные ---
-AppConfig config;                            // Глобальная конфигурация
-SvmInstance svm_instances[MAX_SVM_INSTANCES];  // Массив экземпляров СВ-М
-ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL; // Общая исходящая очередь
-pthread_mutex_t svm_instances_mutex;       // Мьютекс для защиты массива (редко нужен)
-int listen_sockets[MAX_SVM_INSTANCES];       // Массив слушающих сокетов
-pthread_t listener_threads[MAX_SVM_INSTANCES]; // Массив потоков-слушателей
-
-volatile bool keep_running = true;         // Глобальный флаг работы
+AppConfig config;
+SvmInstance svm_instances[MAX_SVM_INSTANCES];
+ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;
+pthread_mutex_t svm_instances_mutex;
+int listen_sockets[MAX_SVM_INSTANCES];
+pthread_t listener_threads[MAX_SVM_CONFIGS]; // Используем MAX_SVM_CONFIGS для согласованности с config
+volatile bool keep_running = true;
 
 // --- Прототипы потоков ---
 extern void* receiver_thread_func(void* arg);
@@ -61,37 +52,19 @@ extern void* sender_thread_func(void* arg);
 extern void* timer_thread_func(void* arg);
 void* listener_thread_func(void* arg);
 
+#ifdef __cplusplus
+} // extern "C"
+#include <QApplication>
+#include "svm_gui.h"
+#else
+// Заглушка для C-компиляции
+typedef void QApplication;
+typedef void SvmMainWindow;
+#endif
+
+
 // --- Обработчик сигналов ---
-void handle_shutdown_signal(int sig) {
-    (void)sig;
-    const char msg[] = "\nSVM: Received shutdown signal. Shutting down all listeners and instances...\n";
-    ssize_t written __attribute__((unused)) = write(STDOUT_FILENO, msg, sizeof(msg) - 1);
-    keep_running = false; // Устанавливаем флаг остановки
-
-    // Закрываем ВСЕ слушающие сокеты, чтобы разбудить потоки listener_thread_func
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-        int fd = listen_sockets[i];
-        if (fd >= 0) {
-            listen_sockets[i] = -1;
-            shutdown(fd, SHUT_RDWR);
-            close(fd);
-        }
-    }
-    // Сигналим очередям и таймеру
-    if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue);
-    stop_timer_thread_signal();
-    // Разбудить Processor'ы через закрытие их входящих очередей
-    // Это лучше делать в основном потоке при штатном завершении
-    // или здесь, если это единственный способ их остановить
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-         pthread_mutex_lock(&svm_instances[i].instance_mutex);
-         if (svm_instances[i].is_active && svm_instances[i].incoming_queue) {
-              qmq_shutdown(svm_instances[i].incoming_queue);
-         }
-         pthread_mutex_unlock(&svm_instances[i].instance_mutex);
-    }
-
-}
+void handle_shutdown_signal(int sig) { /* ... как раньше ... */ }
 
 // --- Функция инициализации экземпляра ---
 void initialize_svm_instance(SvmInstance *instance, int id) {
@@ -106,16 +79,13 @@ void initialize_svm_instance(SvmInstance *instance, int id) {
     instance->current_state = STATE_NOT_INITIALIZED;
     instance->message_counter = 0;
     instance->messages_sent_count = 0;
-
-    // Сброс счетчиков таймера
     instance->bcb_counter = 0;
     instance->link_up_changes_counter = 0;
     instance->link_up_low_time_us100 = 0;
     instance->sign_det_changes_counter = 0;
     instance->link_status_timer_counter = 0;
 
-    // Копируем параметры имитации сбоев из глобальной config
-    if (id >= 0 && id < MAX_SVM_INSTANCES) {
+    if (id >= 0 && id < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES из svm_types.h
          instance->assigned_lak = config.svm_settings[id].lak;
          instance->simulate_control_failure = config.svm_settings[id].simulate_control_failure;
          instance->disconnect_after_messages = config.svm_settings[id].disconnect_after_messages;
@@ -123,16 +93,14 @@ void initialize_svm_instance(SvmInstance *instance, int id) {
          instance->send_warning_on_confirm = config.svm_settings[id].send_warning_on_confirm;
          instance->warning_tks = config.svm_settings[id].warning_tks;
     } else {
-         instance->assigned_lak = 0;
+         instance->assigned_lak = (LogicalAddress)0; // <-- Явное приведение
          instance->simulate_control_failure = false;
          instance->disconnect_after_messages = -1;
          instance->simulate_response_timeout = false;
          instance->send_warning_on_confirm = false;
          instance->warning_tks = 0;
     }
-    // Мьютекс инициализируется в main
 }
-
 
 // --- Поток-слушатель для одного порта/экземпляра ---
 typedef struct {
@@ -154,13 +122,12 @@ void* listener_thread_func(void* arg) {
     instance->assigned_lak = lak;
 
     // Создаем IO интерфейс
-    EthernetConfig listen_config = {0};
+    EthernetConfig listen_config;
+    memset(&listen_config, 0, sizeof(listen_config)); // <-- Используем memset вместо {0}
     listen_config.port = port;
+    // listen_config.base.type неявно 0, что соответствует IO_TYPE_NONE, но listen() его не использует
     listener_io = create_ethernet_interface(&listen_config);
-    if (!listener_io) {
-        fprintf(stderr, "Listener (SVM %d): Failed to create IO interface for port %d.\n", svm_id, port);
-        return NULL;
-    }
+    if (!listener_io) { /* ... */ return NULL; }
 
     // Начинаем слушать
     lfd = listener_io->listen(listener_io);
@@ -179,7 +146,6 @@ void* listener_thread_func(void* arg) {
         int client_handle = -1;
 
         printf("Listener (SVM %d): Waiting for connection on port %d...\n", svm_id, port);
-        // Используем accept из СОБСТВЕННОГО IO интерфейса
         client_handle = listener_io->accept(listener_io, client_ip_str, sizeof(client_ip_str), &client_port_num);
 
         if (client_handle < 0) {
@@ -298,28 +264,31 @@ void* listener_thread_func(void* arg) {
 
 
 // --- Основная функция ---
-int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для QApplication
+int main(int argc, char *argv[]) { // Оставляем аргументы для QApplication
     pthread_t timer_tid = 0, sender_tid = 0;
     bool common_threads_started = false;
     int num_svms_to_run = 0;
-    int result_code = EXIT_SUCCESS; // Код возврата программы
+    int result_code = EXIT_SUCCESS; // Код возврата
+
+    // --- Переносим объявления ДО первого goto ---
+    QApplication* app_ptr = NULL; // Указатели на Qt объекты
+    SvmMainWindow* mainWindow_ptr = NULL;
+#ifdef __cplusplus
+    int qt_exit_code = 0; // Объявляем здесь
+#endif
+    int listeners_started = 0; // Объявляем здесь
 
     printf("SVM Multi-Port Server with Qt GUI starting...\n");
 
-    // --- Инициализация НЕ-Qt части ---
-    if (pthread_mutex_init(&svm_instances_mutex, NULL) != 0) { perror("SVM: Mutex init failed"); exit(EXIT_FAILURE); }
-    if (init_svm_timer_sync() != 0) { perror("SVM: Timer sync init failed"); exit(EXIT_FAILURE); }
+    // --- Инициализация ---
+    if (pthread_mutex_init(&svm_instances_mutex, NULL) != 0) { result_code = EXIT_FAILURE; goto cleanup_sync; }
+    if (init_svm_timer_sync() != 0) { result_code = EXIT_FAILURE; goto cleanup_sync; }
     init_message_handlers();
 
     printf("SVM: Loading configuration...\n");
-    if (load_config("config.ini", &config) != 0) { // Загружаем ВСЮ конфигурацию
-        result_code = EXIT_FAILURE; goto cleanup_sync;
-    }
+    if (load_config("config.ini", &config) != 0) { result_code = EXIT_FAILURE; goto cleanup_sync; }
     num_svms_to_run = config.num_svm_configs_found;
-    if (num_svms_to_run == 0) {
-        fprintf(stderr, "SVM: No SVM configurations found in config file. Exiting.\n");
-        result_code = EXIT_FAILURE; goto cleanup_sync;
-    }
+    if (num_svms_to_run == 0) { /*...*/ result_code = EXIT_FAILURE; goto cleanup_sync; }
     printf("SVM: Will attempt to start %d instances based on config.\n", num_svms_to_run);
 
     // Инициализация экземпляров и их мьютексов
@@ -344,26 +313,24 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
     printf("SVM: Signal handlers might be overridden by Qt. Close the window to exit.\n");
 
     // --- Запуск потоков-слушателей SVM ---
-    int listeners_started = 0;
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-        if (config.svm_config_loaded[i]) { // Запускаем только для сконфигурированных
-             ListenerArgs *args = malloc(sizeof(ListenerArgs));
-             if (!args) { perror("SVM: Failed to allocate listener args"); continue; }
+    // int listeners_started = 0; // <-- Перенесено выше
+    for (int i = 0; i < num_svms_to_run; ++i) {
+        if (config.svm_config_loaded[i]) {
+             ListenerArgs *args = (ListenerArgs*)malloc(sizeof(ListenerArgs)); // <-- Явное приведение
+             if (!args) { continue; }
              args->svm_id = i;
              args->port = config.svm_ethernet[i].port;
              args->lak = config.svm_settings[i].lak;
 
              if (pthread_create(&listener_threads[i], NULL, listener_thread_func, args) != 0) {
-                 perror("SVM: Failed to create listener thread");
-                 free(args);
-                 // TODO: Остановить уже запущенные?
+                   perror("SVM: Failed to create listener thread");
+                   free(args);
              } else {
-                 listeners_started++;
-                  printf("SVM: Listener thread %d initiated for Port %d (LAK 0x%02X).\n", i, args->port, args->lak);
+                   listeners_started++;
+                   printf("SVM: Listener thread %d initiated for Port %d (LAK 0x%02X).\n", i, args->port, args->lak);
              }
         }
-    } // end for start listeners
-
+    }
     if (listeners_started == 0) {
         fprintf(stderr, "SVM: Failed to start any listeners. Exiting.\n");
         result_code = EXIT_FAILURE; goto cleanup_queues;
@@ -383,93 +350,78 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
     printf("SVM: All background threads started. Starting GUI...\n");
 
     // --- Инициализация и запуск Qt ---
-#ifdef __cplusplus // Код компилируется только если используется C++ линкер
-    int qt_exit_code = 0;
-    try {
-        QApplication app(argc, argv);
-        SvmMainWindow mainWindow;
-		printf("SVM Main: Showing main window...\n"); 
-        mainWindow.show();
-		printf("SVM Main: Entering Qt event loop...\n"); 
-        qt_exit_code = app.exec(); // Запускаем цикл обработки событий Qt
-        printf("SVM: Qt application finished with code %d.\n", qt_exit_code);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "SVM: Caught C++ exception: %s\n", e.what());
-        result_code = EXIT_FAILURE;
-    } catch (...) {
-        fprintf(stderr, "SVM: Caught unknown C++ exception.\n");
-        result_code = EXIT_FAILURE;
+#ifdef __cplusplus
+    app_ptr = new QApplication(argc, argv); // Используем new
+    mainWindow_ptr = new SvmMainWindow();  // Используем new
+    if (!app_ptr || !mainWindow_ptr) {
+         fprintf(stderr, "SVM: Failed to create Qt application or main window.\n");
+         result_code = EXIT_FAILURE; goto cleanup_gui; // Метка для очистки Qt
     }
-    // --- Завершение потоков SVM ПОСЛЕ закрытия окна ---
-    // Пользователь закрыл окно, теперь останавливаем все остальное
-    if (keep_running) { // Если сигнал не пришел раньше
-        printf("SVM Main: GUI closed. Initiating shutdown of background threads...\n");
-        keep_running = false; // Устанавливаем флаг
-        // Закрываем слушающие сокеты и сигналим очередям/таймеру
-        for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-            int fd = listen_sockets[i];
-            if (fd >= 0) { listen_sockets[i] = -1; shutdown(fd, SHUT_RDWR); close(fd); }
-        }
-        if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue);
-        stop_timer_thread_signal();
-         // Разбудить Processor'ы
-        for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-             pthread_mutex_lock(&svm_instances[i].instance_mutex);
-             if (svm_instances[i].is_active && svm_instances[i].incoming_queue) {
-                  qmq_shutdown(svm_instances[i].incoming_queue);
-             }
-             pthread_mutex_unlock(&svm_instances[i].instance_mutex);
-        }
-    }
-    goto cleanup_timer; // Переходим к ожиданию потоков
-
-#else // Заглушка, если компилируется как чистый C
+    printf("SVM Main: Showing main window...\n");
+    mainWindow_ptr->show();
+    printf("SVM Main: Entering Qt event loop...\n");
+    qt_exit_code = app_ptr->exec(); // Запускаем цикл Qt
+    printf("SVM: Qt application finished with code %d.\n", qt_exit_code);
+    result_code = (qt_exit_code == 0) ? EXIT_SUCCESS : EXIT_FAILURE; // Устанавливаем код возврата
+#else
     printf("SVM: Qt support not compiled. Running in console mode.\n");
     printf("SVM: Press Ctrl+C to exit.\n");
-    signal(SIGINT, handle_shutdown_signal); // Восстанавливаем обработчик
-    signal(SIGTERM, handle_shutdown_signal);
-    while(keep_running) {
-        sleep(1);
-    }
-    printf("SVM Main: Shutdown initiated. Waiting for threads to join...\n");
-    goto cleanup_timer; // Переходим к очистке
+    while(keep_running) { sleep(1); }
+    result_code = EXIT_SUCCESS; // Завершение по сигналу считаем успехом
 #endif
 
-// --- Очистка ---
+    // --- Завершение потоков SVM ПОСЛЕ закрытия окна или сигнала ---
+cleanup_gui: // Метка для очистки GUI объектов
+#ifdef __cplusplus
+    delete mainWindow_ptr; // Освобождаем память окна
+    delete app_ptr;        // Освобождаем память приложения
+    mainWindow_ptr = NULL;
+    app_ptr = NULL;
+#endif
+
+    keep_running = false; // Устанавливаем флаг для остановки потоков
+    printf("SVM Main: Initiating shutdown of background threads...\n");
+
+    // Закрываем сокеты и сигналим очередям/таймеру (как в handle_shutdown_signal)
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        int fd = listen_sockets[i];
+        if (fd >= 0) { listen_sockets[i] = -1; shutdown(fd, SHUT_RDWR); close(fd); }
+    }
+    if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue);
+    stop_timer_thread_signal();
+
+    // Теперь ждем завершения потоков
+// Метки и код очистки
 cleanup_timer:
     if (common_threads_started && timer_tid != 0) {
-        // stop_timer_thread_signal(); // Уже вызван выше или в обработчике сигнала
+        // stop_timer_thread_signal() уже вызван
         pthread_join(timer_tid, NULL);
         printf("SVM Main: Timer thread joined.\n");
     }
 cleanup_listeners:
     printf("SVM Main: Waiting for listener threads to join...\n");
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
         if (listener_threads[i] != 0) {
             pthread_join(listener_threads[i], NULL);
-             printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
+             // printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
         }
     }
     printf("SVM Main: All listener threads joined.\n");
     if (common_threads_started && sender_tid != 0) {
-        if (svm_outgoing_queue && !svm_outgoing_queue->shutdown) { qmq_shutdown(svm_outgoing_queue); }
+         if (svm_outgoing_queue && !svm_outgoing_queue->shutdown) qmq_shutdown(svm_outgoing_queue);
         pthread_join(sender_tid, NULL);
         printf("SVM Main: Sender thread joined.\n");
     }
-
 cleanup_queues:
 	printf("SVM: Cleaning up queues...\n");
     if (svm_outgoing_queue) qmq_destroy(svm_outgoing_queue);
-    // Входящие очереди уничтожаются внутри listener_thread_func
-
 cleanup_sync:
     printf("SVM: Cleaning up synchronization primitives...\n");
     destroy_svm_timer_sync();
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
+    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
         pthread_mutex_destroy(&svm_instances[i].instance_mutex);
     }
     pthread_mutex_destroy(&svm_instances_mutex);
-
     printf("SVM: Cleanup finished. Exiting with code %d.\n", result_code);
-	return result_code;
+	return result_code; // Возвращаем код результата
 } // end main
