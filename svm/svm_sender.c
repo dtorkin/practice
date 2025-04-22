@@ -41,7 +41,7 @@ void* sender_thread_func(void* arg) {
         bool instance_is_active = false;
         bool limit_reached_this_time = false;
 
-        if (instance_id < 0 || instance_id >= MAX_SVM_CONFIGS) {
+        if (instance_id < 0 || instance_id >= MAX_SVM_INSTANCES) {
              fprintf(stderr,"Sender Thread: Invalid instance ID %d in outgoing queue.\n", instance_id);
              continue;
         }
