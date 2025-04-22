@@ -78,7 +78,7 @@ void SvmMainWindow::updateDisplay() {
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         // --- Читаем данные из SvmInstance БЕЗОПАСНО ---
         bool isActive = false;
-        LogicalAddress lak = 0;
+        LogicalAddress lak = (LogicalAddress)0; // Явное приведение типа
         uint32_t bcb = 0;
         // uint16_t kla = 0, ksa = 0;
         // uint32_t sla = 0;
