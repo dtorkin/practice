@@ -10,7 +10,7 @@
 #include <stdbool.h> // Для bool
 #include "../protocol/protocol_defs.h" // Для Message, LogicalAddress
 #include "../io/io_interface.h" // Для IOInterface
-#include "../config/config.h" // Для MAX_SVM_CONFIGS
+#include "../config/config.h" // Для MAX_SVM_INSTANCES
 
 // Предварительное объявление очереди ответов
 struct ThreadSafeUvmRespQueue;
@@ -64,7 +64,7 @@ typedef enum {
 
 // Структура для хранения состояния связи с одним SVM
 typedef struct {
-    int id;                 // ID этого слота (0..MAX_SVM_CONFIGS-1)
+    int id;                 // ID этого слота (0..MAX_SVM_INSTANCES-1)
     IOInterface *io_handle; // Указатель на созданный IO интерфейс для этого соединения
     int connection_handle;  // Дескриптор сокета/файла
     UvmLinkStatus status;   // Текущий статус соединения

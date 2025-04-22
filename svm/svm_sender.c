@@ -18,7 +18,7 @@
 
 // Внешние глобальные переменные
 extern ThreadSafeQueuedMsgQueue *svm_outgoing_queue;
-extern SvmInstance svm_instances[MAX_SVM_CONFIGS];
+extern SvmInstance svm_instances[MAX_SVM_INSTANCES];
 extern volatile bool keep_running; // Используем глобальный флаг
 extern pthread_mutex_t svm_instances_mutex; // Нужен для безопасного доступа к is_active? (Хотя сейчас читаем только хэндл)
 
@@ -42,7 +42,7 @@ void* sender_thread_func(void* arg) {
         bool should_disconnect = false;
         bool instance_is_active = false; // Проверяем активность перед отправкой
 
-        if (instance_id >= 0 && instance_id < MAX_SVM_CONFIGS) {
+        if (instance_id >= 0 && instance_id < MAX_SVM_INSTANCES) {
             SvmInstance *instance = &svm_instances[instance_id];
             pthread_mutex_lock(&instance->instance_mutex); // Блокируем экземпляр
 

@@ -12,11 +12,11 @@
 #include "../utils/ts_queue_req.h" // Очередь запросов
 #include "../io/io_common.h"
 #include "uvm_types.h"
-#include "../config/config.h" // Для MAX_SVM_CONFIGS
+#include "../config/config.h" // Для MAX_SVM_INSTANCES
 
 // Внешние переменные из uvm_main.c
 extern ThreadSafeReqQueue *uvm_outgoing_request_queue;
-extern UvmSvmLink svm_links[MAX_SVM_CONFIGS];
+extern UvmSvmLink svm_links[MAX_SVM_INSTANCES];
 extern pthread_mutex_t uvm_links_mutex; // Мьютекс для доступа к svm_links
 extern volatile bool uvm_keep_running;
 extern volatile int uvm_outstanding_sends; // Счетчик для синхронизации
@@ -55,7 +55,7 @@ void* uvm_sender_thread_func(void* arg) {
 
             // Получаем данные соединения под мьютексом
             pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS && svm_links[svm_id].status == UVM_LINK_ACTIVE) {
+            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES && svm_links[svm_id].status == UVM_LINK_ACTIVE) {
                 io = svm_links[svm_id].io_handle;
                 handle = svm_links[svm_id].connection_handle;
                 is_active = true;

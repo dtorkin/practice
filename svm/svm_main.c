@@ -20,7 +20,7 @@
 #include <stdbool.h>
 
 // --- Заголовки проекта ---
-#include "../config/config.h" // Сначала config.h для MAX_SVM_CONFIGS
+#include "../config/config.h" // Сначала config.h для MAX_SVM_INSTANCES
 #include "../protocol/protocol_defs.h"
 #include "../protocol/message_utils.h"
 #include "../io/io_common.h"
@@ -32,11 +32,11 @@
 
 // --- Глобальные переменные ---
 AppConfig config;                            // Глобальная конфигурация
-SvmInstance svm_instances[MAX_SVM_CONFIGS];  // Массив экземпляров СВ-М
+SvmInstance svm_instances[MAX_SVM_INSTANCES];  // Массив экземпляров СВ-М
 ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL; // Общая исходящая очередь
 pthread_mutex_t svm_instances_mutex;       // Мьютекс для защиты массива (редко нужен, т.к. доступ по ID)
-int listen_sockets[MAX_SVM_CONFIGS];       // Массив слушающих сокетов (для закрытия при сигнале)
-pthread_t listener_threads[MAX_SVM_CONFIGS]; // Массив потоков-слушателей
+int listen_sockets[MAX_SVM_INSTANCES];       // Массив слушающих сокетов (для закрытия при сигнале)
+pthread_t listener_threads[MAX_SVM_INSTANCES]; // Массив потоков-слушателей
 
 volatile bool keep_running = true;         // Глобальный флаг работы
 
@@ -56,7 +56,7 @@ void handle_shutdown_signal(int sig) {
 
     // Закрываем ВСЕ слушающие сокеты, чтобы разбудить потоки listener_thread_func
     // Используем сохраненные дескрипторы
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         int fd = listen_sockets[i];
         if (fd >= 0) {
             listen_sockets[i] = -1; // Предотвращаем повторное закрытие
@@ -96,7 +96,7 @@ void initialize_svm_instance(SvmInstance *instance, int id) {
 
     // Копируем параметры имитации сбоев из глобальной config
     // (предполагается, что config уже загружена)
-    if (id >= 0 && id < MAX_SVM_CONFIGS) {
+    if (id >= 0 && id < MAX_SVM_INSTANCES) {
          instance->assigned_lak = config.svm_settings[id].lak; // LAK устанавливается здесь
          instance->simulate_control_failure = config.svm_settings[id].simulate_control_failure;
          instance->disconnect_after_messages = config.svm_settings[id].disconnect_after_messages;
@@ -292,7 +292,7 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
     init_message_handlers();
 
     // Инициализация массива экземпляров и мьютексов
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         initialize_svm_instance(&svm_instances[i], i);
         if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
             perror("Failed to initialize instance mutex");
@@ -326,7 +326,7 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
 
     // --- Создание и запуск потоков-слушателей ---
     int listeners_started = 0;
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) { // Проверяем все слоты
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) { // Проверяем все слоты
         if (config.svm_config_loaded[i]) { // Запускаем только для тех, у кого есть конфиг
 
              // Готовим аргументы для потока-слушателя
@@ -386,7 +386,7 @@ cleanup_listeners:
     // Сигналим и ждем завершения потоков-слушателей
     // Обработчик сигнала уже закрыл сокеты, они должны выйти из accept
     printf("SVM Main: Waiting for listener threads to join...\n");
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         if (listener_threads[i] != 0) {
             pthread_join(listener_threads[i], NULL);
              printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
@@ -413,7 +413,7 @@ cleanup_queues:
 cleanup_sync:
     printf("SVM: Cleaning up synchronization primitives...\n");
     destroy_svm_timer_sync();
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         pthread_mutex_destroy(&svm_instances[i].instance_mutex);
     }
     pthread_mutex_destroy(&svm_instances_mutex);

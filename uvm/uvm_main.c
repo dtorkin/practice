@@ -26,7 +26,7 @@
 
 // --- Глобальные переменные ---
 AppConfig config;
-UvmSvmLink svm_links[MAX_SVM_CONFIGS];
+UvmSvmLink svm_links[MAX_SVM_INSTANCES];
 pthread_mutex_t uvm_links_mutex;
 
 ThreadSafeReqQueue *uvm_outgoing_request_queue = NULL;
@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     // Инициализация массива svm_links
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         svm_links[i].id = i;
         svm_links[i].io_handle = NULL;
         svm_links[i].connection_handle = -1;
@@ -238,7 +238,7 @@ int main(int argc, char *argv[]) {
     // --- Основная логика UVM ---
     UvmRequest request;
     request.type = UVM_REQ_SEND_MESSAGE;
-    uint16_t msg_counters[MAX_SVM_CONFIGS] = {0};
+    uint16_t msg_counters[MAX_SVM_INSTANCES] = {0};
 
     printf("\n--- Подготовка к сеансу наблюдения ---\n");
     for (int i = 0; i < num_svms_in_config; ++i) {
@@ -381,7 +381,7 @@ int main(int argc, char *argv[]) {
             LogicalAddress expected_lak = 0;
             UvmLinkStatus current_status = UVM_LINK_INACTIVE;
             pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) { // Проверка валидности ID
+            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) { // Проверка валидности ID
                  expected_lak = svm_links[svm_id].assigned_lak;
                  current_status = svm_links[svm_id].status;
                  // Обновляем время активности при получении сообщения
@@ -429,7 +429,7 @@ int main(int argc, char *argv[]) {
                         uint32_t bcb_host = ntohl(body->bcb);
                         printf("  Confirm Init: LAK=0x%02X, BCB=0x%08X\n", body->lak, bcb_host);
                         pthread_mutex_lock(&uvm_links_mutex);
-                        if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                        if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                              if (body->lak != svm_links[svm_id].assigned_lak) {
                                   fprintf(stderr, "UVM: ERROR! LAK mismatch for SVM ID %d. Expected 0x%02X, Got 0x%02X\n",
                                           svm_id, svm_links[svm_id].assigned_lak, body->lak);
@@ -537,7 +537,7 @@ cleanup_connections:
     printf("UVM: Завершение работы и очистка ресурсов...\n");
     // Закрываем соединения и уничтожаем интерфейсы
     pthread_mutex_lock(&uvm_links_mutex);
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) { // Проверяем все слоты
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) { // Проверяем все слоты
         if (svm_links[i].io_handle) {
             if (svm_links[i].connection_handle >= 0) {
                 svm_links[i].io_handle->disconnect(svm_links[i].io_handle, svm_links[i].connection_handle);

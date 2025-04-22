@@ -33,7 +33,7 @@ static int config_handler(void* user, const char* section, const char* name,
     // Пытаемся распознать секции для SVM
     int sscanf_res_eth = sscanf(section, "ethernet_svm%d", &svm_id);
     if (sscanf_res_eth == 1) {
-        if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+        if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
              if (strcasecmp(name, "port") == 0) {
                  pconfig->svm_ethernet[svm_id].port = (uint16_t)atoi(value);
              }
@@ -43,7 +43,7 @@ static int config_handler(void* user, const char* section, const char* name,
     } else {
         int sscanf_res_set = sscanf(section, "svm_settings_%d", &svm_id);
          if (sscanf_res_set == 1) {
-            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                  if (strcasecmp(name, "lak") == 0) {
                       pconfig->svm_settings[svm_id].lak = (LogicalAddress)strtol(value, NULL, 0);
                  } else if (strcasecmp(name, "simulate_control_failure") == 0) {
@@ -105,7 +105,7 @@ int load_config(const char *filename, AppConfig *config) {
     config->serial.stop_bits = 1;
 
     // Устанавливаем дефолты для всех слотов SVM
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         config->svm_ethernet[i].port = 0; // Признак "не загружено"
         config->svm_settings[i].lak = 0;  // Признак "не загружено"
         // Дефолты для имитации сбоев (все выключено)
@@ -138,7 +138,7 @@ int load_config(const char *filename, AppConfig *config) {
 
     // 4. Подсчитать найденные конфиги SVM и установить дефолты, если не найдено
     config->num_svm_configs_found = 0;
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         // Проверяем флаг, установленный в config_handler
         if (config->svm_config_loaded[i]) {
             config->num_svm_configs_found++;
@@ -157,8 +157,8 @@ int load_config(const char *filename, AppConfig *config) {
     }
     printf("Found configurations for %d SVM instances in file.\n", config->num_svm_configs_found);
 
-    // 5. Валидация (проверяем все слоты до MAX_SVM_CONFIGS, т.к. задали дефолты)
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    // 5. Валидация (проверяем все слоты до MAX_SVM_INSTANCES, т.к. задали дефолты)
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
          // Валидация порта
          if (config->svm_ethernet[i].port == 0 || config->svm_ethernet[i].port > 65535) {
              fprintf(stderr, "Warning: Invalid port %d for SVM %d config slot. Using default %d.\n", config->svm_ethernet[i].port, i, 8080 + i);
@@ -186,7 +186,7 @@ int load_config(const char *filename, AppConfig *config) {
     printf("--- Effective Configuration ---\n");
     printf("  interface_type = %s\n", config->interface_type);
     printf("  UVM Target: %s:%d\n", config->uvm_ethernet_target.target_ip, config->uvm_ethernet_target.port);
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
          printf("  SVM %d: Port=%d, LAK=0x%02X (Loaded: %s)\n",
                 i,
                 config->svm_ethernet[i].port,

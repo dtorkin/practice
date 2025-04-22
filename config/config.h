@@ -11,7 +11,7 @@
 #include <stdbool.h> // <-- Добавляем для bool
 
 // Максимальное количество SVM, чьи настройки можно хранить и эмулировать
-#define MAX_SVM_CONFIGS 4
+#define MAX_SVM_INSTANCES 4
 
 // Настройки, специфичные для одного SVM
 typedef struct {
@@ -37,9 +37,9 @@ typedef struct {
     char interface_type[16];
 
     // --- Настройки для SVM ---
-    SvmEthernetConfig svm_ethernet[MAX_SVM_CONFIGS];
-    SvmInstanceSettings svm_settings[MAX_SVM_CONFIGS];
-    bool svm_config_loaded[MAX_SVM_CONFIGS];
+    SvmEthernetConfig svm_ethernet[MAX_SVM_INSTANCES];
+    SvmInstanceSettings svm_settings[MAX_SVM_INSTANCES];
+    bool svm_config_loaded[MAX_SVM_INSTANCES];
     int num_svm_configs_found;
 
     // --- Настройки для UVM ---

@@ -14,17 +14,17 @@
 #include "../io/io_common.h"
 #include "../utils/ts_uvm_resp_queue.h" // Новая очередь ответов
 #include "uvm_types.h"
-#include "../config/config.h" // Для MAX_SVM_CONFIGS
+#include "../config/config.h" // Для MAX_SVM_INSTANCES
 
 // Внешние переменные из uvm_main.c
 extern ThreadSafeUvmRespQueue *uvm_incoming_response_queue; // Общая очередь ответов
-extern UvmSvmLink svm_links[MAX_SVM_CONFIGS]; // Нужен для обновления статуса
+extern UvmSvmLink svm_links[MAX_SVM_INSTANCES]; // Нужен для обновления статуса
 extern pthread_mutex_t uvm_links_mutex;      // Мьютекс для доступа к svm_links
 extern volatile bool uvm_keep_running;
 
 void* uvm_receiver_thread_func(void* arg) {
     UvmSvmLink *link = (UvmSvmLink*)arg;
-    if (!link || !link->io_handle || link->connection_handle < 0 || link->id < 0 || link->id >= MAX_SVM_CONFIGS) {
+    if (!link || !link->io_handle || link->connection_handle < 0 || link->id < 0 || link->id >= MAX_SVM_INSTANCES) {
         fprintf(stderr, "Receiver Thread (SVM ?): Invalid arguments provided.\n");
         return NULL;
     }
