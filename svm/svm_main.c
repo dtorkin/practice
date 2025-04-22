@@ -323,7 +323,7 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
     printf("SVM: Will attempt to start %d instances based on config.\n", num_svms_to_run);
 
     // Инициализация экземпляров и их мьютексов
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         initialize_svm_instance(&svm_instances[i], i); // Использует глобальную config
         if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
             perror("Failed to initialize instance mutex");
@@ -345,7 +345,7 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
 
     // --- Запуск потоков-слушателей SVM ---
     int listeners_started = 0;
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         if (config.svm_config_loaded[i]) { // Запускаем только для сконфигурированных
              ListenerArgs *args = malloc(sizeof(ListenerArgs));
              if (!args) { perror("SVM: Failed to allocate listener args"); continue; }
@@ -406,14 +406,14 @@ int main(int argc, char *argv[]) { // <-- Возвращаем argc, argv для
         printf("SVM Main: GUI closed. Initiating shutdown of background threads...\n");
         keep_running = false; // Устанавливаем флаг
         // Закрываем слушающие сокеты и сигналим очередям/таймеру
-        for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
             int fd = listen_sockets[i];
             if (fd >= 0) { listen_sockets[i] = -1; shutdown(fd, SHUT_RDWR); close(fd); }
         }
         if (svm_outgoing_queue) qmq_shutdown(svm_outgoing_queue);
         stop_timer_thread_signal();
          // Разбудить Processor'ы
-        for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+        for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
              pthread_mutex_lock(&svm_instances[i].instance_mutex);
              if (svm_instances[i].is_active && svm_instances[i].incoming_queue) {
                   qmq_shutdown(svm_instances[i].incoming_queue);
@@ -444,7 +444,7 @@ cleanup_timer:
     }
 cleanup_listeners:
     printf("SVM Main: Waiting for listener threads to join...\n");
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         if (listener_threads[i] != 0) {
             pthread_join(listener_threads[i], NULL);
              printf("SVM Main: Listener thread for SVM ID %d joined.\n", i);
@@ -465,7 +465,7 @@ cleanup_queues:
 cleanup_sync:
     printf("SVM: Cleaning up synchronization primitives...\n");
     destroy_svm_timer_sync();
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         pthread_mutex_destroy(&svm_instances[i].instance_mutex);
     }
     pthread_mutex_destroy(&svm_instances_mutex);
