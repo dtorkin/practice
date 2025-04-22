@@ -35,91 +35,91 @@ void* sender_thread_func(void* arg) {
         }
 
         int instance_id = queuedMsgToSend.instance_id;
-        SvmInstance *instance = NULL; // Указатель на экземпляр
-
-        // --- Получаем данные экземпляра и проверяем отключение ---
+        SvmInstance *instance = NULL;
         int client_handle = -1;
         IOInterface *io_handle = NULL;
-        bool should_disconnect = false;
         bool instance_is_active = false;
-        int current_sent_count = 0;
-        int disconnect_threshold = -1;
+        bool limit_reached_this_time = false;
 
-        if (instance_id >= 0 && instance_id < MAX_SVM_INSTANCES) {
-            instance = &svm_instances[instance_id];
-            pthread_mutex_lock(&instance->instance_mutex); // Блокируем экземпляр
-
-            instance_is_active = instance->is_active;
-            if (instance_is_active) {
-                client_handle = instance->client_handle;
-                io_handle = instance->io_handle;
-                disconnect_threshold = instance->disconnect_after_messages;
-
-                // Инкрементируем счетчик ПЕРЕД отправкой (чтобы N-е сообщение было последним)
-                if (disconnect_threshold > 0) {
-                     instance->messages_sent_count++;
-                     current_sent_count = instance->messages_sent_count; // Сохраняем для лога
-                     if (current_sent_count >= disconnect_threshold) {
-                         should_disconnect = true;
-                         instance->is_active = false; // Помечаем неактивным СРАЗУ
-                         printf("Sender Thread: Instance %d reached message limit (%d >= %d). Preparing disconnect.\n",
-                                instance_id, current_sent_count, disconnect_threshold);
-                         // Закрываем очередь, чтобы разбудить процессор
-                         if (instance->incoming_queue) qmq_shutdown(instance->incoming_queue);
-                     }
-                } else {
-                     current_sent_count = instance->messages_sent_count; // Все равно сохраняем для лога
-                }
-            }
-            pthread_mutex_unlock(&instance->instance_mutex); // Отпускаем мьютекс экземпляра
-        } else {
+        if (instance_id < 0 || instance_id >= MAX_SVM_CONFIGS) {
              fprintf(stderr,"Sender Thread: Invalid instance ID %d in outgoing queue.\n", instance_id);
-             continue; // Пропускаем это сообщение
+             continue;
         }
-        // --- Конец блока получения данных ---
+        instance = &svm_instances[instance_id];
 
+        // --- Проверяем статус и счетчик ДО отправки ---
+        pthread_mutex_lock(&instance->instance_mutex);
+        instance_is_active = instance->is_active;
+        if (instance_is_active) {
+            client_handle = instance->client_handle;
+            io_handle = instance->io_handle;
+            int disconnect_threshold = instance->disconnect_after_messages;
 
-        // Отправляем, только если активен и хэндлы валидны
+            if (disconnect_threshold > 0) {
+                 // Проверяем, НЕ достигли ли мы лимита НА ПРЕДЫДУЩЕМ сообщении
+                 if (instance->messages_sent_count < disconnect_threshold) {
+                      // Увеличиваем счетчик ПЕРЕД отправкой ТЕКУЩЕГО
+                      instance->messages_sent_count++;
+                      // Проверяем, НЕ достиг ли лимит ИМЕННО СЕЙЧАС
+                      if (instance->messages_sent_count >= disconnect_threshold) {
+                           limit_reached_this_time = true;
+                           printf("Sender Thread: Instance %d reached message limit (%d >= %d). Will disconnect AFTER this send.\n",
+                                  instance_id, instance->messages_sent_count, disconnect_threshold);
+                           // НЕ помечаем is_active=false здесь, сделаем после отправки
+                           // Но можем закрыть очередь процессора
+                           // if (instance->incoming_queue) qmq_shutdown(instance->incoming_queue); // Рано?
+                      }
+                 } else {
+                      // Лимит уже был достигнут ранее, отправлять не должны
+                      instance_is_active = false;
+                      printf("Sender Thread: Instance %d message limit %d already reached. Discarding msg type %u.\n",
+                             instance_id, disconnect_threshold, queuedMsgToSend.message.header.message_type);
+                 }
+            }
+        }
+        pthread_mutex_unlock(&instance->instance_mutex);
+        // --- Конец проверки статуса и счетчика ---
+
+        // Отправляем, только если все еще активны и хэндлы валидны
+        bool send_error = false;
         if (instance_is_active && client_handle >= 0 && io_handle != NULL) {
-             // Отладочный лог перед отправкой
-             // printf("Sender Thread: Sending msg type %u to instance %d (handle %d), sent count %d\n",
-             //       queuedMsgToSend.message.header.message_type, instance_id, client_handle, current_sent_count);
-
+             // printf("Sender Thread: Sending msg type %u to instance %d (handle %d), sent count %d\n", ...);
             if (send_protocol_message(io_handle, client_handle, &queuedMsgToSend.message) != 0) {
-                // Ошибка отправки
-                if (keep_running) { // Логируем ошибку, только если не штатное завершение
-                     fprintf(stderr, "Sender Thread: Error sending message (type %u) to instance %d (handle %d). Deactivating instance.\n",
+                send_error = true; // Ошибка отправки
+                if (keep_running) {
+                     fprintf(stderr, "Sender Thread: Error sending message (type %u) to instance %d (handle %d).\n",
                             queuedMsgToSend.message.header.message_type, instance_id, client_handle);
                 }
-                // Помечаем как неактивный и закрываем ресурсы
-                pthread_mutex_lock(&instance->instance_mutex);
-                 if (instance->is_active) { // Доп. проверка
-                     if (instance->client_handle >= 0) {
-                         shutdown(instance->client_handle, SHUT_RDWR);
-                     }
-                     instance->is_active = false;
-                     if (instance->incoming_queue) {
-                          qmq_shutdown(instance->incoming_queue);
-                     }
-                 }
-                pthread_mutex_unlock(&instance->instance_mutex);
-            } else if (should_disconnect) {
-                 // Успешно отправили ПОСЛЕДНЕЕ сообщение, теперь отключаем
-                 printf("Sender Thread: SIMULATING disconnect for instance %d after sending message %d.\n", instance_id, current_sent_count);
-                 pthread_mutex_lock(&instance->instance_mutex);
-                 if(instance->client_handle >= 0) { // Хендл все еще должен быть валиден
-                      shutdown(instance->client_handle, SHUT_RDWR); // Разрываем соединение
-                      // close() будет вызван в listener'е
-                 }
-                 // is_active уже false
-                 pthread_mutex_unlock(&instance->instance_mutex);
             }
-            // Если не было ошибки и не надо отключаться, просто успешно отправили
-        } else if (!instance_is_active && client_handle >= 0){
-             // Экземпляр стал неактивным (из-за should_disconnect или ошибки в другом потоке)
-             printf("Sender Thread: Instance %d became inactive before send could complete. Message type %u discarded.\n",
-                    instance_id, queuedMsgToSend.message.header.message_type);
+        } else if (instance_is_active) { // Был активен, но хэндлы невалидны?
+             fprintf(stderr,"Sender Thread: Instance %d active but handles invalid? Discarding msg type %u.\n",
+                     instance_id, queuedMsgToSend.message.header.message_type);
+             send_error = true; // Считаем ошибкой
         }
+        // Если !instance_is_active, сообщение просто игнорируется
+
+        // --- Обработка после попытки отправки ---
+        if (send_error || limit_reached_this_time) {
+             pthread_mutex_lock(&instance->instance_mutex);
+             if (instance->is_active) { // Проверяем снова, вдруг что-то изменилось
+                  instance->is_active = false; // Помечаем неактивным
+                  if (limit_reached_this_time) {
+                       printf("Sender Thread: SIMULATING disconnect for instance %d after sending message %d.\n", instance_id, instance->messages_sent_count);
+                  } else { // send_error == true
+                       printf("Sender Thread: Deactivating instance %d due to send error.\n", instance_id);
+                  }
+                  // Закрываем соединение и очередь в любом случае (достигли лимита или ошибка)
+                  if (instance->client_handle >= 0) {
+                      shutdown(instance->client_handle, SHUT_RDWR);
+                  }
+                  if (instance->incoming_queue) {
+                       qmq_shutdown(instance->incoming_queue);
+                  }
+             }
+             pthread_mutex_unlock(&instance->instance_mutex);
+        }
+        // --- Конец обработки ---
+
     } // end while
 
     printf("SVM Sender thread finished.\n");
