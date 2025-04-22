@@ -71,7 +71,7 @@ typedef struct {
     LogicalAddress assigned_lak; // Ожидаемый/подтвержденный LAK этого SVM
     pthread_t receiver_tid; // ID потока-приемника для этого соединения
     // Можно добавить счетчики или другую статистику
-    uint32_t last_message_time; // Время последнего сообщения (для таймаутов)
+    time_t last_activity_time; // Время последней активности (для Keep-Alive)
 
 } UvmSvmLink;
 

@@ -79,6 +79,9 @@ void* uvm_receiver_thread_func(void* arg) {
                   continue;
              }
         } else { // Успех
+			pthread_mutex_lock(&uvm_links_mutex); // Захватываем мьютекс
+			link->last_activity_time = time(NULL); // Обновляем время активности
+			pthread_mutex_unlock(&uvm_links_mutex); // Отпускаем мьютекс
             // Копируем сообщение в структуру для очереди
 			response_msg.source_svm_id = svm_id; // <-- Устанавливаем ID ПЕРЕД enqueue
 			memcpy(&response_msg.message, &receivedMessage, sizeof(Message)); // Копируем сообщение

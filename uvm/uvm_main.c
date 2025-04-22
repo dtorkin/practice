@@ -202,6 +202,7 @@ int main(int argc, char *argv[]) {
          } else {
              printf("UVM: Successfully connected to SVM ID %d (Handle: %d).\n", i, svm_links[i].connection_handle);
              svm_links[i].status = UVM_LINK_ACTIVE;
+			 svm_links[i].last_activity_time = time(NULL); // <-- ИНИЦИАЛИЗИРОВАТЬ ВРЕМЯ
              active_svm_count++;
          }
     }
@@ -367,60 +368,207 @@ int main(int argc, char *argv[]) {
     printf("UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...\n");
     UvmResponseMessage response;
     while (uvm_keep_running) {
+
+        bool message_received_in_this_iteration = false; // Флаг для паузы
+
+        // Пытаемся извлечь сообщение из очереди ответов
         if (uvq_dequeue(uvm_incoming_response_queue, &response)) {
-            // Получаем ожидаемый LAK для логгирования
+            message_received_in_this_iteration = true; // Сообщение получено
+            int svm_id = response.source_svm_id;
+            Message *msg = &response.message;
+            uint16_t msg_num = get_full_message_number(&msg->header);
+
+            // Получаем ожидаемый LAK и текущий статус ПОД МЬЮТЕКСОМ
             LogicalAddress expected_lak = 0;
+            UvmLinkStatus current_status = UVM_LINK_INACTIVE;
             pthread_mutex_lock(&uvm_links_mutex);
-            if (response.source_svm_id >= 0 && response.source_svm_id < MAX_SVM_CONFIGS) {
-                 expected_lak = svm_links[response.source_svm_id].assigned_lak;
+            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) { // Проверка валидности ID
+                 expected_lak = svm_links[svm_id].assigned_lak;
+                 current_status = svm_links[svm_id].status;
+                 // Обновляем время активности при получении сообщения
+                 if(current_status == UVM_LINK_ACTIVE) {
+                     svm_links[svm_id].last_activity_time = time(NULL);
+                 }
             }
             pthread_mutex_unlock(&uvm_links_mutex);
 
-            printf("UVM Main: Received message type %u from SVM ID %d (Expected LAK 0x%02X, Num %u)\n",
-                   response.message.header.message_type,
-                   response.source_svm_id,
-                   expected_lak,
-                   get_full_message_number(&response.message.header));
+            // Игнорируем сообщения от неактивных линков
+            if (current_status != UVM_LINK_ACTIVE) {
+                printf("UVM Main: Ignored message type %u from non-active SVM ID %d (Status: %d)\n",
+                       msg->header.message_type, svm_id, current_status);
+                continue; // Переходим к следующей итерации цикла while
+            }
 
-            // TODO: Детальная обработка ответа в контексте response.source_svm_id
-             if (response.message.header.address != LOGICAL_ADDRESS_UVM_VAL) {
-                   fprintf(stderr, "Warning: Message from SVM %d has incorrect UVM address 0x%02X\n",
-                           response.source_svm_id, response.message.header.address);
-              }
-        } else {
+            // Логируем получение сообщения
+            printf("UVM Main: Received message type %u from SVM ID %d (Expected LAK 0x%02X, Num %u)\n",
+                   msg->header.message_type, svm_id, expected_lak, msg_num);
+
+            // --- Обработка ошибочных и ожидаемых ответов ---
+            bool message_handled = false;
+
+            // 1. Проверка на "Предупреждение"
+            if (msg->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE) {
+                message_handled = true;
+                PreduprezhdenieBody *warn_body = (PreduprezhdenieBody*)msg->body;
+                uint32_t bcb_host = ntohl(warn_body->bcb); // Преобразуем порядок байт
+                fprintf(stderr, "\n!!! UVM: WARNING received from SVM ID %d (LAK 0x%02X) !!!\n", svm_id, warn_body->lak);
+                fprintf(stderr, "  Event Type (TKS): %u\n", warn_body->tks);
+                // TODO: Декодировать и вывести warn_body->pks (6 байт параметров)
+                fprintf(stderr, "  BCB: 0x%08X\n", bcb_host);
+                // Реакция: пока только логируем
+                // TODO: Определить реакцию в зависимости от TKS (например, пометить линк FAILED)
+                // pthread_mutex_lock(&uvm_links_mutex);
+                // svm_links[svm_id].status = UVM_LINK_FAILED;
+                // pthread_mutex_unlock(&uvm_links_mutex);
+            }
+
+            // 3. Проверка содержимого для ожидаемых ответов
+            if (!message_handled) {
+                 switch (msg->header.message_type) {
+                    case MESSAGE_TYPE_CONFIRM_INIT: {
+                        ConfirmInitBody *body = (ConfirmInitBody*)msg->body;
+                        uint32_t bcb_host = ntohl(body->bcb);
+                        printf("  Confirm Init: LAK=0x%02X, BCB=0x%08X\n", body->lak, bcb_host);
+                        pthread_mutex_lock(&uvm_links_mutex);
+                        if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                             if (body->lak != svm_links[svm_id].assigned_lak) {
+                                  fprintf(stderr, "UVM: ERROR! LAK mismatch for SVM ID %d. Expected 0x%02X, Got 0x%02X\n",
+                                          svm_id, svm_links[svm_id].assigned_lak, body->lak);
+                                  svm_links[svm_id].status = UVM_LINK_FAILED;
+                                  if (svm_links[svm_id].connection_handle >= 0) {
+                                       shutdown(svm_links[svm_id].connection_handle, SHUT_RDWR);
+                                  }
+                             } else {
+                                  printf("  LAK confirmed for SVM ID %d.\n", svm_id);
+                             }
+                        }
+                        pthread_mutex_unlock(&uvm_links_mutex);
+                        message_handled = true;
+                        break;
+                    }
+                    case MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA: {
+                         PodtverzhdenieKontrolyaBody *body = (PodtverzhdenieKontrolyaBody*)msg->body;
+                         uint32_t bcb_host = ntohl(body->bcb);
+                         printf("  Control Confirmation: LAK=0x%02X, TK=0x%02X, BCB=0x%08X\n",
+                                body->lak, body->tk, bcb_host);
+                         // TODO: Проверить, соответствует ли body->tk отправленному запросу
+                         message_handled = true;
+                         break;
+                    }
+                    case MESSAGE_TYPE_RESULTATY_KONTROLYA: {
+                         RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody*)msg->body;
+                         uint16_t vsk_host = ntohs(body->vsk);
+                         uint32_t bcb_host = ntohl(body->bcb);
+                         printf("  Control Results: LAK=0x%02X, RSK=0x%02X, VSK=%ums, BCB=0x%08X\n",
+                                body->lak, body->rsk, vsk_host, bcb_host);
+                         if (body->rsk != 0x3F) { // 0x3F - пример "все ОК"
+                              fprintf(stderr, "UVM: WARNING! Control failed/partially failed for SVM ID %d (LAK 0x%02X). RSK = 0x%02X\n",
+                                      svm_id, body->lak, body->rsk);
+                              // TODO: Определить реакцию (например, пометить WARNING/FAILED)
+                         }
+                         message_handled = true;
+                         break;
+                    }
+                    case MESSAGE_TYPE_SOSTOYANIE_LINII: {
+                        SostoyanieLiniiBody *body = (SostoyanieLiniiBody *)message->body;
+                        uint16_t kla_host = ntohs(body->kla);
+                        uint32_t sla_host = ntohl(body->sla);
+                        uint16_t ksa_host = ntohs(body->ksa);
+                        uint32_t bcb_host = ntohl(body->bcb);
+                         printf("  Line Status: LAK=0x%02X, KLA=%u, SLA=%u (x 1/100us), KSA=%u, BCB=0x%08X\n",
+                                body->lak, kla_host, sla_host, ksa_host, bcb_host);
+                        message_handled = true;
+                        break;
+                    }
+                    // Обработка сообщений данных (СУБК, КО и т.д.) - пока просто логируем
+                    case MESSAGE_TYPE_SUBK:
+                    case MESSAGE_TYPE_KO:
+                    case MESSAGE_TYPE_NK:
+                    case MESSAGE_TYPE_RO:
+                    // Добавить другие типы данных, если нужно
+                         printf("  Received data message type %u from SVM %d\n", msg->header.message_type, svm_id);
+                         message_handled = true;
+                         break;
+
+                    default:
+                         // Тип не обрабатывается в switch
+                         break;
+                } // end switch
+            } // end if (!message_handled)
+
+            if (!message_handled) {
+                printf("  Received unhandled or unexpected message type %u from SVM ID %d.\n", msg->header.message_type, svm_id);
+            }
+
+        } else { // Очередь пуста или закрыта
             if (!uvm_keep_running) {
                 printf("UVM Main: Response queue shut down. Exiting loop.\n");
                 break;
             }
-            usleep(10000);
+            // Очередь пуста, message_received_in_this_iteration = false
         }
-    }
 
-// Метка для перехода при ошибке запуска потоков
+        // --- Периодическая проверка Keep-Alive ---
+        time_t now_keepalive = time(NULL);
+        const time_t keepalive_timeout = 60; // Таймаут молчания 60 секунд
+        for (int k = 0; k < num_svms_in_config; ++k) { // Проверяем все настроенные SVM
+             pthread_mutex_lock(&uvm_links_mutex);
+             if (svm_links[k].status == UVM_LINK_ACTIVE &&
+                 (now_keepalive - svm_links[k].last_activity_time) > keepalive_timeout)
+             {
+                  fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT for SVM ID %d (no activity for %ld seconds)!\n",
+                          k, keepalive_timeout);
+                  svm_links[k].status = UVM_LINK_FAILED; // Помечаем как сбойный
+                  if (svm_links[k].connection_handle >= 0) {
+                       shutdown(svm_links[k].connection_handle, SHUT_RDWR); // Закрываем соединение
+                       // close() будет вызван в cleanup_connections
+                  }
+             }
+             pthread_mutex_unlock(&uvm_links_mutex);
+        }
+
+        // Небольшая пауза, если не было сообщений, чтобы не грузить CPU
+        if (!message_received_in_this_iteration && uvm_keep_running) {
+            usleep(100000); // 100 мс
+        }
+
+    } // end while (uvm_keep_running)
+
+
 cleanup_threads:
     printf("UVM: Инициируем завершение потоков...\n");
-    uvm_keep_running = false;
+    uvm_keep_running = false; // Убедимся, что флаг установлен
+    // Сигналим очередям
     if (uvm_outgoing_request_queue) {
         UvmRequest shutdown_req = {.type = UVM_REQ_SHUTDOWN};
-        // Попытка добавить может быть небезопасной, если очередь уже закрыта
-        // queue_req_enqueue(uvm_outgoing_request_queue, &shutdown_req);
+        // Пытаемся добавить, но если очередь закрыта - не страшно
+        queue_req_enqueue(uvm_outgoing_request_queue, &shutdown_req);
         queue_req_shutdown(uvm_outgoing_request_queue);
     }
     if (uvm_incoming_response_queue) uvq_shutdown(uvm_incoming_response_queue);
+
+    // Сигналим условию ожидания
     pthread_mutex_lock(&uvm_send_counter_mutex);
     uvm_outstanding_sends = 0;
-    pthread_cond_broadcast(&uvm_all_sent_cond); // Используем broadcast на всякий случай
+    pthread_cond_broadcast(&uvm_all_sent_cond);
     pthread_mutex_unlock(&uvm_send_counter_mutex);
+
+    // Закрываем сокеты, чтобы разбудить Receiver'ов
+    printf("UVM: Shutting down connections...\n"); // Добавлен лог
     pthread_mutex_lock(&uvm_links_mutex);
-    for(int i=0; i<num_svms_in_config; ++i) { // Используем num_svms_in_config
-        if(svm_links[i].connection_handle >= 0) { shutdown(svm_links[i].connection_handle, SHUT_RDWR); }
+    for(int i=0; i<num_svms_in_config; ++i) {
+        if(svm_links[i].connection_handle >= 0) {
+             shutdown(svm_links[i].connection_handle, SHUT_RDWR);
+        }
     }
     pthread_mutex_unlock(&uvm_links_mutex);
 
+
+    // Ожидаем завершения потоков
     printf("UVM: Ожидание завершения потоков...\n");
     if (sender_tid != 0) pthread_join(sender_tid, NULL);
     printf("UVM: Sender thread joined.\n");
-    for (int i = 0; i < num_svms_in_config; ++i) { // Используем num_svms_in_config
+    for (int i = 0; i < num_svms_in_config; ++i) {
         if (svm_links[i].receiver_tid != 0) {
             pthread_join(svm_links[i].receiver_tid, NULL);
             //printf("UVM: Receiver thread for SVM ID %d joined.\n", i);
@@ -431,28 +579,34 @@ cleanup_threads:
 
 cleanup_connections:
     printf("UVM: Завершение работы и очистка ресурсов...\n");
+    // Закрываем соединения и уничтожаем интерфейсы
     pthread_mutex_lock(&uvm_links_mutex);
     for (int i = 0; i < MAX_SVM_CONFIGS; ++i) { // Проверяем все слоты
         if (svm_links[i].io_handle) {
             if (svm_links[i].connection_handle >= 0) {
                 svm_links[i].io_handle->disconnect(svm_links[i].io_handle, svm_links[i].connection_handle);
-                printf("UVM: Connection for SVM ID %d closed.\n", i);
+                // printf("UVM: Connection for SVM ID %d closed.\n", i); // Уже не нужно, т.к. Receiver завершился
             }
             svm_links[i].io_handle->destroy(svm_links[i].io_handle);
-             printf("UVM: IO Interface for SVM ID %d destroyed.\n", i);
+             // printf("UVM: IO Interface for SVM ID %d destroyed.\n", i);
             svm_links[i].io_handle = NULL;
             svm_links[i].connection_handle = -1;
             svm_links[i].status = UVM_LINK_INACTIVE;
+            svm_links[i].receiver_tid = 0; // Сбрасываем ID потока
         }
     }
     pthread_mutex_unlock(&uvm_links_mutex);
 
 cleanup_queues:
+    // Уничтожаем очереди
     if (uvm_outgoing_request_queue) queue_req_destroy(uvm_outgoing_request_queue);
     if (uvm_incoming_response_queue) uvq_destroy(uvm_incoming_response_queue);
+
+    // Уничтожаем мьютексы и условие
     pthread_mutex_destroy(&uvm_links_mutex);
     pthread_mutex_destroy(&uvm_send_counter_mutex);
     pthread_cond_destroy(&uvm_all_sent_cond);
+
     printf("UVM: Очистка завершена.\n");
     return 0;
 }
