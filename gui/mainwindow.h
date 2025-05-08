@@ -36,6 +36,7 @@ private:
     QVector<QLabel*> m_lakLabels;
     QVector<QLabel*> m_lastSentLabels;
     QVector<QLabel*> m_lastRecvLabels;
+	QVector<QLabel*> m_bcbLabels;
 
     QString statusToString(int status); // Вспомогательная функция
     QString statusToStyleSheet(int status); // Вспомогательная функция

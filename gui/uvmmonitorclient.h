@@ -14,6 +14,7 @@ struct SvmStatusData {
     int lastSentNum = -1;
     int lastRecvType = -1;
     int lastRecvNum = -1;
+	quint32 bcb = 0;
     // Добавить другие поля при необходимости
 };
 

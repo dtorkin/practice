@@ -14,6 +14,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_lakLabels << ui->valueLAK_0 << ui->valueLAK_1 << ui->valueLAK_2 << ui->valueLAK_3;
     m_lastSentLabels << ui->valueLastSent_0 << ui->valueLastSent_1 << ui->valueLastSent_2 << ui->valueLastSent_3;
     m_lastRecvLabels << ui->valueLastRecv_0 << ui->valueLastRecv_1 << ui->valueLastRecv_2 << ui->valueLastRecv_3;
+	m_bcbLabels << ui->valueBCB_0 << ui->valueBCB_1 << ui->valueBCB_2 << ui->valueBCB_3;
 
     // Инициализируем начальное состояние
     for(int i = 0; i < 4; ++i) {
@@ -22,6 +23,7 @@ MainWindow::MainWindow(QWidget *parent)
          m_lakLabels[i]->setText("0x??");
          m_lastSentLabels[i]->setText("Type: - Num: -");
          m_lastRecvLabels[i]->setText("Type: - Num: -");
+		 m_bcbLabels[i]->setText("0"); // <-- ДОБАВИТЬ
     }
 
 
@@ -60,6 +62,7 @@ void MainWindow::updateSvmDisplay(const SvmStatusData &data)
     m_lakLabels[id]->setText(QString("0x%1").arg(data.lak, 2, 16, QChar('0').toUpper()));
     m_lastSentLabels[id]->setText(QString("Type: %1 Num: %2").arg(data.lastSentType).arg(data.lastSentNum));
     m_lastRecvLabels[id]->setText(QString("Type: %1 Num: %2").arg(data.lastRecvType).arg(data.lastRecvNum));
+	m_bcbLabels[id]->setText(QString::number(data.bcb)); // Обновляем BCB
     // Добавить обновление других полей...
 }
 

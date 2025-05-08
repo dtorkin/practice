@@ -185,26 +185,21 @@ void* gui_server_thread(void* arg) {
             for (int i = 0; i < config.num_svm_configs_found; ++i) {
                  if (!config.svm_config_loaded[i]) continue;
 
-                 // Формат: ID:0;Status:2;LAK:8;SentType:1;SentNum:1;RecvType:3;RecvNum:1;BCB:123;KLA:0;SLA:0;KSA:0;RSK:63;WarnTKS:0|... \n
+                 // Формат: ID:0;Status:2;LAK:8;SentType:1;SentNum:1;RecvType:3;RecvNum:1;BCB:123|... \n
                  snprintf(temp_buffer, sizeof(temp_buffer),
-                          "ID:%d;Status:%d;LAK:%d;SentType:%d;SentNum:%d;RecvType:%d;RecvNum:%d;BCB:%u;KLA:%u;SLA:%u;KSA:%u;RSK:%u;WarnTKS:%u|",
-                          i,
-                          (int)svm_links[i].status,
-                          svm_links[i].assigned_lak,
-                          svm_links[i].last_sent_msg_type, // Отправляем тип как int
-                          svm_links[i].last_sent_msg_num,
-                          svm_links[i].last_recv_msg_type, // Отправляем тип как int
-                          svm_links[i].last_recv_msg_num,
-                          svm_links[i].last_recv_bcb,
-                          svm_links[i].last_recv_kla,
-                          svm_links[i].last_recv_sla_us100,
-                          svm_links[i].last_recv_ksa,
-                          svm_links[i].last_control_rsk,
-                          svm_links[i].last_warning_tks);
+                      "ID:%d;Status:%d;LAK:%d;SentType:%d;SentNum:%d;RecvType:%d;RecvNum:%d;BCB:%u|", // <-- Убрали лишние поля, добавили BCB
+                      i,
+                      (int)svm_links[i].status,
+                      svm_links[i].assigned_lak,
+                      svm_links[i].last_sent_msg_type,
+                      svm_links[i].last_sent_msg_num,
+                      svm_links[i].last_recv_msg_type,
+                      svm_links[i].last_recv_msg_num,
+                      svm_links[i].last_recv_bcb);
 
-                 if (strlen(status_buffer) + strlen(temp_buffer) < sizeof(status_buffer) - 1) {
-                      strcat(status_buffer, temp_buffer);
-                 } else {
+             if (strlen(status_buffer) + strlen(temp_buffer) < sizeof(status_buffer) - 1) {
+                  strcat(status_buffer, temp_buffer);
+             } else {
                       fprintf(stderr, "GUI Server: Status buffer overflow!\n");
                       break; // Прерываем формирование строки
                  }
