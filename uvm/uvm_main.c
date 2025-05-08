@@ -372,7 +372,7 @@ int main(int argc, char *argv[]) {
 
     // --- Запуск потоков ---
     printf("UVM: Запуск потоков Sender, Receiver(s) и GUI Server...\n"); // Обновлен лог
-    if (pthread_create(&sender_tid, NULL, uvm_sender_thread_func, NULL) != 0)
+    if (pthread_create(&sender_tid, NULL, uvm_sender_thread_func, NULL) != 0) {
         perror("UVM: Failed to create sender thread");
         goto cleanup_connections;
     }
@@ -567,7 +567,7 @@ int main(int argc, char *argv[]) {
 
             // --- Обновление данных в svm_links[svm_id] ---
             pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                  expected_lak = svm_links[svm_id].assigned_lak;
                  current_status = svm_links[svm_id].status;
                  if(current_status == UVM_LINK_ACTIVE) {
@@ -755,7 +755,8 @@ int main(int argc, char *argv[]) {
             usleep(100000); // 100 мс
         }
 
-    } // end while (uvm_keep_running)
+ // end while (uvm_keep_running)
+}
 
 cleanup_connections:
     printf("UVM: Завершение работы и очистка ресурсов...\n");
