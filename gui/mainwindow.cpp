@@ -32,7 +32,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_client, &UvmMonitorClient::connectionStatusChanged, this, &MainWindow::updateConnectionStatus);
 
     // Запускаем подключение (можно сделать по кнопке)
-    QTimer::singleShot(100, m_client, &UvmMonitorClient::connectToServer); // Небольшая задержка перед подключением
+    m_client->connectToServer(); // Подключаемся сразу
     // Или сразу: m_client->connectToServer();
 
     ui->statusbar->showMessage("Connecting to UVM App...");
