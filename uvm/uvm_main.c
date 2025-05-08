@@ -524,7 +524,7 @@ int main(int argc, char *argv[]) {
     wait_for_outstanding_sends();
     printf("UVM: Все сообщения подготовки к съемке отправлены.\n");
 
-/*
+
 	printf("\n--- Тест Отправки Дополнительных Команд ---\n");
 	int extra_commands_to_send = 10; // Отправим еще 10 команд каждому
 	for (int cmd_count = 0; cmd_count < extra_commands_to_send; ++cmd_count) {
@@ -547,7 +547,7 @@ int main(int argc, char *argv[]) {
 		sleep(1); // Небольшая пауза между пачками
 	}
 	printf("--- Конец Теста Отправки Дополнительных Команд ---\n");
-*/
+
 
 
     // --- Ожидание ответов и Keep-Alive / Таймауты ---
