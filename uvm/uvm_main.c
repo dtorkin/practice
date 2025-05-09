@@ -74,21 +74,61 @@ void uvm_handle_shutdown_signal(int sig) {
     // Закрываем сокеты SVM (делается в main при cleanup)
 }
 
+// Вспомогательная функция для отправки сообщения в GUI
+// Вызывается из разных мест, где нужно уведомить GUI о событии
+void send_to_gui_socket(const char *message_to_gui) {
+    if (!uvm_keep_running) return; // Не отправляем, если уже завершаемся
+
+    pthread_mutex_lock(&gui_socket_mutex);
+    if (gui_client_fd >= 0) {
+        // Добавляем \n, если его нет, т.к. GUI парсит по строкам
+        char buffer_with_newline[1024]; // Достаточно большой буфер
+        strncpy(buffer_with_newline, message_to_gui, sizeof(buffer_with_newline) - 2);
+        buffer_with_newline[sizeof(buffer_with_newline) - 2] = '\0'; // Гарантируем null-терминацию
+        // Если строка не пустая и не заканчивается на \n, добавляем его
+        size_t len = strlen(buffer_with_newline);
+        if (len > 0 && buffer_with_newline[len - 1] != '\n') {
+            if (len < sizeof(buffer_with_newline) - 1) {
+                buffer_with_newline[len] = '\n';
+                buffer_with_newline[len + 1] = '\0';
+            } else { // Буфер почти полон, просто заменяем последний символ
+                buffer_with_newline[sizeof(buffer_with_newline) - 2] = '\n';
+            }
+        } else if (len == 0) { // Пустая строка, просто отправляем \n
+             strcpy(buffer_with_newline, "\n");
+        }
+
+
+        ssize_t sent = send(gui_client_fd, buffer_with_newline, strlen(buffer_with_newline), MSG_NOSIGNAL);
+        if (sent <= 0) {
+            if (sent == 0) {
+                printf("GUI Server: GUI client (FD %d) closed connection during send_to_gui_socket.\n", gui_client_fd);
+            } else if (errno != EPIPE && errno != ECONNRESET) { // Игнорируем ошибки разрыва соединения здесь
+                perror("GUI Server: send_to_gui_socket send failed");
+            }
+            // Закрываем и сбрасываем, если ошибка или закрытие
+            close(gui_client_fd);
+            gui_client_fd = -1;
+        }
+    }
+    pthread_mutex_unlock(&gui_socket_mutex);
+}
+
 // Функция отправки запроса Sender'у
 bool send_uvm_request(UvmRequest *request) {
     if (!uvm_outgoing_request_queue || !request) return false;
+    bool success = true;
+
     if (request->type == UVM_REQ_SEND_MESSAGE) {
+        // Обновляем инфо о последнем отправленном сообщении ПОД МЬЮТЕКСОМ
         pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
-            if (svm_links[request->target_svm_id].status == UVM_LINK_ACTIVE) {
-                 svm_links[request->target_svm_id].last_sent_msg_type = request->message.header.message_type;
-                 svm_links[request->target_svm_id].last_sent_msg_num = get_full_message_number(&request->message.header);
-                 // *************** ИЗМЕНЕНИЕ: Обновление счетчика для имитации отключения ***************
-                 if (svm_links[request->target_svm_id].simulating_disconnect_by_svm &&
-                     svm_links[request->target_svm_id].svm_disconnect_countdown > 0) {
-                      svm_links[request->target_svm_id].svm_disconnect_countdown--;
-                 }
-                 // **********************************************************************************
+        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_CONFIGS) {
+            UvmSvmLink *link = &svm_links[request->target_svm_id];
+            if (link->status == UVM_LINK_ACTIVE) {
+                 link->last_sent_msg_type = request->message.header.message_type;
+                 link->last_sent_msg_num = get_full_message_number(&request->message.header);
+                 link->last_sent_msg_time = time(NULL);
+                 // НЕ обновляем last_activity_time при отправке, только при приеме
             }
         }
         pthread_mutex_unlock(&uvm_links_mutex);
@@ -97,16 +137,35 @@ bool send_uvm_request(UvmRequest *request) {
         uvm_outstanding_sends++;
         pthread_mutex_unlock(&uvm_send_counter_mutex);
     }
+
     if (!queue_req_enqueue(uvm_outgoing_request_queue, request)) {
-        fprintf(stderr, "UVM Main: Failed to enqueue request (type %d)\n", request->type);
+        fprintf(stderr, "UVM Main: Failed to enqueue request (type %s, target_svm_id %d)\n",
+                uvm_request_type_to_message_name(request->type), request->target_svm_id);
+        success = false;
         if (request->type == UVM_REQ_SEND_MESSAGE) {
              pthread_mutex_lock(&uvm_send_counter_mutex);
              if(uvm_outstanding_sends > 0) uvm_outstanding_sends--;
              pthread_mutex_unlock(&uvm_send_counter_mutex);
         }
-        return false;
+    } else if (request->type == UVM_REQ_SEND_MESSAGE) {
+         // Успешно поставили в очередь на отправку, уведомим GUI
+         char gui_msg_buffer[256];
+         pthread_mutex_lock(&uvm_links_mutex); // Нужен LAK для лога
+         LogicalAddress target_lak = 0;
+         if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_CONFIGS) {
+            target_lak = svm_links[request->target_svm_id].assigned_lak;
+         }
+         pthread_mutex_unlock(&uvm_links_mutex);
+
+         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                  "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
+                  request->target_svm_id,
+                  request->message.header.message_type,
+                  get_full_message_number(&request->message.header),
+                  target_lak);
+         send_to_gui_socket(gui_msg_buffer);
     }
-    return true;
+    return success;
 }
 
 // Функция ожидания отправки всех сообщений
@@ -136,46 +195,60 @@ void* gui_server_thread(void* arg) {
     int listen_port = 12345; // Порт для подключения GUI
     struct sockaddr_in serv_addr, cli_addr;
     socklen_t cli_len = sizeof(cli_addr);
+    char gui_msg_buffer[1024]; // Буфер для отправки начального состояния
 
     printf("GUI Server: Starting listener on port %d\n", listen_port);
 
     gui_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (gui_listen_fd < 0) { perror("GUI Server: socket"); return NULL; }
+    if (gui_listen_fd < 0) {
+        perror("GUI Server: socket");
+        return NULL;
+    }
 
     int opt = 1;
-    setsockopt(gui_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (setsockopt(gui_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("GUI Server: setsockopt(SO_REUSEADDR) failed");
+        // Не фатально, но может мешать быстрому перезапуску
+    }
 
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // Слушаем на всех локальных IP
     serv_addr.sin_port = htons(listen_port);
 
     if (bind(gui_listen_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("GUI Server: bind failed"); close(gui_listen_fd); gui_listen_fd = -1; return NULL;
+        perror("GUI Server: bind failed");
+        close(gui_listen_fd);
+        gui_listen_fd = -1;
+        return NULL;
     }
-    if (listen(gui_listen_fd, 1) < 0) {
-        perror("GUI Server: listen failed"); close(gui_listen_fd); gui_listen_fd = -1; return NULL;
+
+    if (listen(gui_listen_fd, 1) < 0) { // Очередь ожидания 1 клиент
+        perror("GUI Server: listen failed");
+        close(gui_listen_fd);
+        gui_listen_fd = -1;
+        return NULL;
     }
 
     printf("GUI Server: Waiting for GUI connection on port %d...\n", listen_port);
 
     while (uvm_keep_running) {
-        int current_client = -1; // Локальная переменная для текущего клиента
-        int lfd = gui_listen_fd;
-        if (lfd < 0) break;
-
-        int new_client_fd = accept(lfd, (struct sockaddr*)&cli_addr, &cli_len);
+        int lfd_current = gui_listen_fd; // Копируем перед блокирующим вызовом
+        if (lfd_current < 0) { // Если сокет был закрыт извне (например, сигналом)
+            break;
+        }
+        int new_client_fd = accept(lfd_current, (struct sockaddr*)&cli_addr, &cli_len);
 
         if (new_client_fd < 0) {
             if (!uvm_keep_running || errno == EBADF) {
                  printf("GUI Server: Accept loop interrupted or socket closed.\n");
             } else if (errno == EINTR) {
-                 printf("GUI Server: accept() interrupted, retrying...\n");
-                 continue;
+                 // printf("GUI Server: accept() interrupted, retrying...\n");
+                 continue; // Повторяем accept
             } else {
                 if(uvm_keep_running) perror("GUI Server: Accept failed");
             }
-            break;
+            break; // Выходим из цикла при ошибке или завершении
         }
 
         char client_ip_str[INET_ADDRSTRLEN];
@@ -184,102 +257,93 @@ void* gui_server_thread(void* arg) {
                client_ip_str, ntohs(cli_addr.sin_port), new_client_fd);
 
         pthread_mutex_lock(&gui_socket_mutex);
-        if (gui_client_fd >= 0) {
+        if (gui_client_fd >= 0) { // Если уже есть клиент GUI
             printf("GUI Server: Closing previous GUI connection (FD %d)\n", gui_client_fd);
             close(gui_client_fd);
         }
-        gui_client_fd = new_client_fd;
-        current_client = gui_client_fd; // Устанавливаем для этого цикла
+        gui_client_fd = new_client_fd; // Сохраняем новый дескриптор
         pthread_mutex_unlock(&gui_socket_mutex);
 
-        // Цикл отправки данных этому GUI клиенту
-        while (uvm_keep_running && current_client >= 0) {
-            char status_buffer[2048] = ""; // Увеличим буфер для большего количества полей
-            char temp_buffer[512];      // Увеличим временный буфер
+        // --- Отправка начального состояния всех SVM новому клиенту GUI ---
+        printf("GUI Server: Sending initial state to new GUI client (FD %d).\n", new_client_fd);
+        for (int i = 0; i < config.num_svm_configs_found; ++i) {
+            if (!config.svm_config_loaded[i]) continue; // Пропускаем незагруженные
 
-            // Формируем строку статуса
-            pthread_mutex_lock(&uvm_links_mutex);
-            for (int i = 0; i < config.num_svm_configs_found; ++i) {
-                 if (!config.svm_config_loaded[i]) continue;
+            pthread_mutex_lock(&uvm_links_mutex); // Блокируем доступ к svm_links
+            // 1. Отправляем текущий статус линка
+            snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                     "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d", i, svm_links[i].status);
+            send_to_gui_socket(gui_msg_buffer);
 
-                 // *************** ОБНОВЛЕННЫЙ ФОРМАТ СТРОКИ ДЛЯ IPC ***************
-                 snprintf(temp_buffer, sizeof(temp_buffer),
-                          "ID:%d;Status:%d;LAK:%d;"
-                          "SentType:%d;SentNum:%d;"
-                          "RecvType:%d;RecvNum:%d;"
-                          "BCB:%u;RSK:%u;WarnTKS:%u;"
-                          "Timeout:%d;LAKFail:%d;CtrlFail:%d;"
-                          "SimDisc:%d;DiscCnt:%d|",
-                          i,
-                          (int)svm_links[i].status,
-                          svm_links[i].assigned_lak,
-                          svm_links[i].last_sent_msg_type,
-                          svm_links[i].last_sent_msg_num,
-                          svm_links[i].last_recv_msg_type,
-                          svm_links[i].last_recv_msg_num,
-                          svm_links[i].last_recv_bcb,
-                          svm_links[i].last_control_rsk,
-                          svm_links[i].last_warning_tks,
-                          svm_links[i].timeout_detected ? 1 : 0,
-                          svm_links[i].lak_mismatch_detected ? 1 : 0,
-                          svm_links[i].control_failure_flag ? 1 : 0,
-                          svm_links[i].simulating_disconnect_by_svm ? 1 : 0,
-                          svm_links[i].svm_disconnect_countdown
-                         );
-                 // *****************************************************************
-
-                 if (strlen(status_buffer) + strlen(temp_buffer) < sizeof(status_buffer) - 1) {
-                      strcat(status_buffer, temp_buffer);
-                 } else {
-                      fprintf(stderr, "GUI Server: Status buffer overflow!\n");
-                      break;
-                 }
+            // 2. Отправляем информацию о последнем отправленном сообщении UVM
+            if (svm_links[i].last_sent_msg_time > 0) { // Если было отправлено хоть что-то
+                snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                         "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
+                         i, svm_links[i].last_sent_msg_type, svm_links[i].last_sent_msg_num, svm_links[i].assigned_lak);
+                send_to_gui_socket(gui_msg_buffer);
+            }
+            // 3. Отправляем информацию о последнем полученном сообщении от SVM
+            if (svm_links[i].last_recv_msg_time > 0) { // Если было получено хоть что-то
+                snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X", // LAK здесь - это адрес отправителя (SVM) из заголовка
+                         i, svm_links[i].last_recv_msg_type, svm_links[i].last_recv_msg_num, svm_links[i].assigned_lak); // Используем assigned_lak для консистентности
+                send_to_gui_socket(gui_msg_buffer);
+            }
+            // 4. Отправляем информацию об ошибках/предупреждениях (если были)
+            if (svm_links[i].timeout_detected) {
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity", i);
+                 send_to_gui_socket(gui_msg_buffer);
+            }
+            if (svm_links[i].response_timeout_detected) { // Если это поле будет
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:ResponseTimeout;Details:Command timed out", i);
+                 send_to_gui_socket(gui_msg_buffer);
+            }
+            if (svm_links[i].lak_mismatch_detected) {
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:LAK incorrect", i);
+                 send_to_gui_socket(gui_msg_buffer);
+            }
+            if (svm_links[i].control_failure_detected) {
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X", i, svm_links[i].last_control_rsk);
+                 send_to_gui_socket(gui_msg_buffer);
+            }
+            if (svm_links[i].last_warning_tks != 0) {
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u", i, svm_links[i].last_warning_tks);
+                 send_to_gui_socket(gui_msg_buffer);
             }
             pthread_mutex_unlock(&uvm_links_mutex);
-
-            if (strlen(status_buffer) > 0) {
-                 status_buffer[strlen(status_buffer) - 1] = '\n'; // Заменяем последний '|' на '\n'
-            } else {
-                 strcpy(status_buffer, "NoActiveSVMs\n"); // Если нет активных, отправляем это
-            }
-
-            // Отправляем статус клиенту GUI
-            pthread_mutex_lock(&gui_socket_mutex);
-            current_client = gui_client_fd; // Перепроверяем хэндл на случай, если он изменился
-            if (current_client >= 0) {
-                ssize_t sent = send(current_client, status_buffer, strlen(status_buffer), MSG_NOSIGNAL);
-                if (sent <= 0) {
-                    if (sent < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
-                        // Ошибка не фатальная, попробуем позже
-                    } else {
-                         if (sent == 0) printf("GUI Server: GUI client (FD %d) closed connection gracefully.\n", current_client);
-                         else perror("GUI Server: send failed");
-                         close(current_client);
-                         gui_client_fd = -1;   // Сбрасываем глобальный
-                         current_client = -1; // Выходим из внутреннего цикла
-                    }
-                }
-            }
-            pthread_mutex_unlock(&gui_socket_mutex);
-
-            // Пауза перед следующей отправкой
-            for(int t=0; t<10 && uvm_keep_running && current_client >=0; ++t) {
-                 usleep(100000); // 10 * 100мс = 1 секунда
-            }
-        } // end while send loop (для текущего клиента)
-        if (current_client == -1) { // Если соединение было разорвано
-             printf("GUI Server: Disconnected from GUI client.\n");
         }
-         // Возвращаемся к accept для нового клиента, если uvm_keep_running все еще true
-    } // end while main loop (uvm_keep_running)
+        printf("GUI Server: Initial state sent to GUI client (FD %d).\n", new_client_fd);
+        // --- Конец отправки начального состояния ---
+
+        // Этот поток теперь просто держит соединение с GUI открытым.
+        // Данные будут отправляться в GUI из send_to_gui_socket(), вызываемой другими частями main.
+        // Нам нужно как-то детектировать, что GUI клиент закрыл соединение.
+        // Можно периодически пытаться отправить "пустое" сообщение (ping) или просто ждать ошибок send.
+        while(uvm_keep_running) {
+            // Проверяем, жив ли еще клиент, пытаясь что-то отправить (например, пустую строку раз в N сек)
+            // или просто ждем, пока send_to_gui_socket() не вернет ошибку.
+            // Для простоты, этот цикл будет просто спать. send_to_gui_socket() обработает разрыв.
+            // Если gui_client_fd станет -1 (из-за ошибки в send_to_gui_socket), выходим.
+            pthread_mutex_lock(&gui_socket_mutex);
+            int current_client_fd_check = gui_client_fd;
+            pthread_mutex_unlock(&gui_socket_mutex);
+            if (current_client_fd_check != new_client_fd || current_client_fd_check < 0) { // Клиент изменился или закрылся
+                 printf("GUI Server: GUI client (FD %d) seems to have disconnected or changed. Waiting for new one.\n", new_client_fd);
+                 break; // Выходим из этого внутреннего цикла и возвращаемся к accept
+            }
+            sleep(1); // Спим, пока соединение с GUI активно
+        }
+        // Если вышли из внутреннего цикла, значит, соединение с GUI было разорвано
+        // или uvm_keep_running стал false.
+        printf("GUI Server: Loop for client FD %d ended.\n", new_client_fd);
+        // Возвращаемся к accept для нового клиента GUI, если uvm_keep_running еще true
+    } // end while main loop
 
     printf("GUI Server: Thread shutting down.\n");
-    // Закрываем сокеты, если они еще открыты (на случай если вышли не через uvm_handle_shutdown_signal)
     pthread_mutex_lock(&gui_socket_mutex);
      if (gui_listen_fd >= 0) { close(gui_listen_fd); gui_listen_fd = -1;}
      if (gui_client_fd >= 0) { close(gui_client_fd); gui_client_fd = -1;}
     pthread_mutex_unlock(&gui_socket_mutex);
-
     return NULL;
 }
 
@@ -343,28 +407,31 @@ int main(int argc, char *argv[]) {
 	} // Инициализация мьютекса GUI
 
     // Инициализация массива svm_links
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) { // Используем MAX_SVM_INSTANCES
-        svm_links[i].id = i;
-        svm_links[i].io_handle = NULL;
-        svm_links[i].connection_handle = -1;
-        svm_links[i].status = UVM_LINK_INACTIVE;
-        svm_links[i].receiver_tid = 0;
-        svm_links[i].assigned_lak = 0;
-        svm_links[i].last_activity_time = 0;
-        svm_links[i].last_sent_msg_type = (MessageType)0; // Или какой-то Invalid тип
-        svm_links[i].last_sent_msg_num = 0;
-        svm_links[i].last_recv_msg_type = (MessageType)0;
-        svm_links[i].last_recv_msg_num = 0;
-        svm_links[i].last_recv_bcb = 0;
-        svm_links[i].last_control_rsk = 0xFF; // Признак "не было"
-        svm_links[i].last_warning_tks = 0;    // 0 - нет предупреждения
-        svm_links[i].last_warning_time = 0;
-        svm_links[i].timeout_detected = false;
-        svm_links[i].lak_mismatch_detected = false;
-        svm_links[i].control_failure_flag = false;
-        svm_links[i].simulating_disconnect_by_svm = false; // По умолчанию SVM не имитирует дисконнект
-        svm_links[i].svm_disconnect_countdown = -1;     // Выключено
-    }
+	for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+		svm_links[i].id = i;
+		svm_links[i].io_handle = NULL;
+		svm_links[i].connection_handle = -1;
+		svm_links[i].status = UVM_LINK_INACTIVE;
+		svm_links[i].receiver_tid = 0;
+		svm_links[i].assigned_lak = 0;
+		svm_links[i].last_activity_time = 0; // Будет установлено при подключении
+
+		// Инициализация новых полей
+		svm_links[i].last_sent_msg_type = (MessageType)0; // Или специальное значение "нет сообщения"
+		svm_links[i].last_sent_msg_num = 0;
+		svm_links[i].last_sent_msg_time = 0;
+		svm_links[i].last_recv_msg_type = (MessageType)0;
+		svm_links[i].last_recv_msg_num = 0;
+		svm_links[i].last_recv_msg_time = 0;
+		svm_links[i].last_recv_bcb = 0;
+		svm_links[i].last_control_rsk = 0xFF; // Признак "не было контроля"
+		svm_links[i].last_warning_tks = 0;   // 0 - нет предупреждения
+		svm_links[i].last_warning_time = 0;
+		svm_links[i].timeout_detected = false;
+		svm_links[i].response_timeout_detected = false;
+		svm_links[i].lak_mismatch_detected = false;
+		svm_links[i].control_failure_detected = false;
+	}
 
     printf("UVM: Загрузка конфигурации...\n");
     if (load_config("config.ini", &config) != 0) { exit(EXIT_FAILURE); }
@@ -666,75 +733,74 @@ int main(int argc, char *argv[]) {
     // --- Ожидание ответов и Keep-Alive / Таймауты ---
     printf("UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...\n");
     UvmResponseMessage response;
-    while (uvm_keep_running) {
-        bool message_received_in_this_iteration = false;
+	while (uvm_keep_running) {
+		bool message_received_in_this_iteration = false;
+		UvmResponseMessage response;
 
-        if (uvq_dequeue(uvm_incoming_response_queue, &response)) {
-            message_received_in_this_iteration = true;
-            int svm_id = response.source_svm_id;
-            Message *msg = &response.message;
-            uint16_t msg_num = get_full_message_number(&msg->header);
+		if (uvq_dequeue(uvm_incoming_response_queue, &response)) {
+			message_received_in_this_iteration = true;
+			int svm_id = response.source_svm_id;
+			Message *msg = &response.message;
+			uint16_t msg_num = get_full_message_number(&msg->header);
+			char gui_msg_buffer[256];
 
-            LogicalAddress expected_lak = 0;
-            UvmLinkStatus current_status = UVM_LINK_INACTIVE;
+			// --- Обновление данных в svm_links[svm_id] и отправка в GUI ---
+			pthread_mutex_lock(&uvm_links_mutex);
+			if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+				UvmSvmLink *link = &svm_links[svm_id];
+				if(link->status == UVM_LINK_ACTIVE) {
+					link->last_activity_time = time(NULL);
+					link->last_recv_msg_type = msg->header.message_type;
+					link->last_recv_msg_num = msg_num;
+					link->last_recv_msg_time = time(NULL);
 
-            // --- Обновление данных в svm_links[svm_id] ---
-            pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES
-                 expected_lak = svm_links[svm_id].assigned_lak;
-                 current_status = svm_links[svm_id].status;
-                 if(current_status == UVM_LINK_ACTIVE) {
-                     svm_links[svm_id].last_activity_time = time(NULL);
-                     svm_links[svm_id].last_recv_msg_type = msg->header.message_type;
-                     svm_links[svm_id].last_recv_msg_num = msg_num;
-                     // *************** ОБНОВЛЕНИЕ СПЕЦИФИЧНЫХ ПОЛЕЙ ДЛЯ GUI ***************
-                     switch(msg->header.message_type) {
-                         case MESSAGE_TYPE_CONFIRM_INIT:
-                              if(ntohs(msg->header.body_length) >= sizeof(ConfirmInitBody)) {
-                                   svm_links[svm_id].last_recv_bcb = ntohl(((ConfirmInitBody*)msg->body)->bcb);
-                                   if (((ConfirmInitBody*)msg->body)->lak != svm_links[svm_id].assigned_lak) {
-                                        svm_links[svm_id].lak_mismatch_detected = true;
-                                   } else {
-                                        svm_links[svm_id].lak_mismatch_detected = false; // Сбрасываем, если совпал
-                                   }
-                              }
-                              break;
-                         case MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA:
-                              if(ntohs(msg->header.body_length) >= sizeof(PodtverzhdenieKontrolyaBody)) {
-                                   svm_links[svm_id].last_recv_bcb = ntohl(((PodtverzhdenieKontrolyaBody*)msg->body)->bcb);
-                              }
-                              break;
-                         case MESSAGE_TYPE_PREDUPREZHDENIE:
-                              if(ntohs(msg->header.body_length) >= sizeof(PreduprezhdenieBody)) {
-                                   PreduprezhdenieBody* warn_body = (PreduprezhdenieBody*)msg->body;
-                                   svm_links[svm_id].last_recv_bcb = ntohl(warn_body->bcb);
-                                   svm_links[svm_id].last_warning_tks = warn_body->tks;
-                                   svm_links[svm_id].last_warning_time = time(NULL);
-                              }
-                              break;
-                         case MESSAGE_TYPE_RESULTATY_KONTROLYA:
-                              if(ntohs(msg->header.body_length) >= sizeof(RezultatyKontrolyaBody)) {
-                                   RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody*)msg->body;
-                                   svm_links[svm_id].last_control_rsk = body->rsk;
-                                   svm_links[svm_id].last_recv_bcb = ntohl(body->bcb);
-                                   svm_links[svm_id].control_failure_flag = (body->rsk != 0x3F); // Пример "ОК"
-                              }
-                              break;
-                         case MESSAGE_TYPE_SOSTOYANIE_LINII:
-                              if(ntohs(msg->header.body_length) >= sizeof(SostoyanieLiniiBody)) {
-                                   SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg->body;
-                                   // svm_links[svm_id].last_recv_kla = ntohs(body->kla); // Убрали для упрощения IPC
-                                   // svm_links[svm_id].last_recv_sla_us100 = ntohl(body->sla);
-                                   // svm_links[svm_id].last_recv_ksa = ntohs(body->ksa);
-                                   svm_links[svm_id].last_recv_bcb = ntohl(body->bcb);
-                              }
-                              break;
-                     }
-                     // *********************************************************************
-                 }
-            }
-            pthread_mutex_unlock(&uvm_links_mutex);
-            // --- Конец обновления svm_links ---
+					snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+							 "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X", // LAK из заголовка ответа (адрес SVM)
+							 svm_id, msg->header.message_type, msg_num, msg->header.address);
+					send_to_gui_socket(gui_msg_buffer);
+
+					// Обновляем специфичные поля и отправляем EVENT для GUI
+					if (msg->header.message_type == MESSAGE_TYPE_CONFIRM_INIT && ntohs(msg->header.body_length) >= sizeof(ConfirmInitBody)) {
+						ConfirmInitBody *body = (ConfirmInitBody*)msg->body;
+						link->last_recv_bcb = ntohl(body->bcb);
+						if (body->lak != link->assigned_lak) {
+							link->lak_mismatch_detected = true;
+							link->status = UVM_LINK_FAILED; // Считаем ошибкой
+							snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+									 "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X",
+									 svm_id, link->assigned_lak, body->lak);
+							send_to_gui_socket(gui_msg_buffer);
+						}
+					} else if (msg->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA && ntohs(msg->header.body_length) >= sizeof(RezultatyKontrolyaBody)) {
+						RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody*)msg->body;
+						link->last_recv_bcb = ntohl(body->bcb);
+						link->last_control_rsk = body->rsk;
+						if (body->rsk != 0x3F) { // 0x3F - все ОК
+							link->control_failure_detected = true;
+							link->status = UVM_LINK_WARNING; // Можно WARNING или FAILED
+							snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+									 "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X",
+									 svm_id, body->rsk);
+							send_to_gui_socket(gui_msg_buffer);
+						}
+					} else if (msg->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII && ntohs(msg->header.body_length) >= sizeof(SostoyanieLiniiBody)) {
+						 SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg->body;
+						 link->last_recv_bcb = ntohl(body->bcb);
+						 // Сохраняем KLA, SLA, KSA, если нужно передавать в GUI
+					} else if (msg->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE && ntohs(msg->header.body_length) >= sizeof(PreduprezhdenieBody)) {
+						 PreduprezhdenieBody *body = (PreduprezhdenieBody*)msg->body;
+						 link->last_recv_bcb = ntohl(body->bcb);
+						 link->last_warning_tks = body->tks;
+						 link->last_warning_time = time(NULL);
+						 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+								  "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u",
+								  svm_id, body->tks);
+						 send_to_gui_socket(gui_msg_buffer);
+					}
+				}
+			}
+			pthread_mutex_unlock(&uvm_links_mutex);
+			// --- Конец обновления svm_links и отправки в GUI ---
 
             // Игнорируем сообщения от неактивных линков
             if (current_status != UVM_LINK_ACTIVE) {
@@ -852,29 +918,37 @@ int main(int argc, char *argv[]) {
             // Очередь пуста, message_received_in_this_iteration = false
         }
 
-        // --- Периодическая проверка Keep-Alive ---
-        time_t now_keepalive = time(NULL);
-        const time_t keepalive_timeout = 60; // Таймаут молчания 60 секунд
-        for (int k = 0; k < num_svms_in_config; ++k) { // Проверяем все настроенные SVM
-             pthread_mutex_lock(&uvm_links_mutex);
-             if (svm_links[k].status == UVM_LINK_ACTIVE &&
-                 (now_keepalive - svm_links[k].last_activity_time) > keepalive_timeout)
-             {
-                  fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT for SVM ID %d (no activity for %ld seconds)!\n",
-                          k, keepalive_timeout);
-                  svm_links[k].status = UVM_LINK_FAILED; // Помечаем как сбойный
-                  if (svm_links[k].connection_handle >= 0) {
-                       shutdown(svm_links[k].connection_handle, SHUT_RDWR); // Закрываем соединение
-                       // close() будет вызван в cleanup_connections
-                  }
-             }
-             pthread_mutex_unlock(&uvm_links_mutex);
-        }
+		// --- Периодическая проверка Keep-Alive и таймаутов ответа ---
+		time_t now_check = time(NULL);
+		const time_t keepalive_timeout_sec = 30; // Таймаут Keep-Alive
+		// const time_t response_timeout_sec = 10; // Таймаут ожидания ответа на команду (если реализуем)
 
-        // Небольшая пауза, если не было сообщений, чтобы не грузить CPU
-        if (!message_received_in_this_iteration && uvm_keep_running) {
-            usleep(100000); // 100 мс
-        }
+		for (int k = 0; k < num_svms_in_config; ++k) {
+			pthread_mutex_lock(&uvm_links_mutex);
+			if (svm_links[k].status == UVM_LINK_ACTIVE) {
+				// Keep-Alive Check
+				if ((now_check - svm_links[k].last_activity_time) > keepalive_timeout_sec) {
+					 fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT for SVM ID %d!\n", k);
+					 svm_links[k].status = UVM_LINK_FAILED;
+					 svm_links[k].timeout_detected = true;
+					 if (svm_links[k].connection_handle >= 0) {
+						  shutdown(svm_links[k].connection_handle, SHUT_RDWR);
+					 }
+					 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+							  "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity", k);
+					 send_to_gui_socket(gui_msg_buffer);
+					 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+							  "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d", k, UVM_LINK_FAILED);
+					 send_to_gui_socket(gui_msg_buffer);
+				}
+				// TODO: Здесь можно добавить проверку таймаута ответа на команду, если ResponseExpectation реализован
+			}
+			pthread_mutex_unlock(&uvm_links_mutex);
+		}
+
+		if (!message_received_in_this_iteration && uvm_keep_running) {
+			usleep(100000); // Пауза, если не было сообщений
+		}
 
  // end while (uvm_keep_running)
 }

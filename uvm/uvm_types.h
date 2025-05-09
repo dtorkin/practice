@@ -64,36 +64,39 @@ typedef enum {
 } UvmLinkStatus;
 
 // Структура для хранения состояния связи с одним SVM
-typedef struct {
+typedef struct UvmSvmLink {
     int id;                 // ID этого слота (0..MAX_SVM_INSTANCES-1)
     IOInterface *io_handle; // Указатель на созданный IO интерфейс
     int connection_handle;  // Дескриптор сокета/файла
     UvmLinkStatus status;   // Текущий статус соединения
     LogicalAddress assigned_lak; // Ожидаемый/подтвержденный LAK
     pthread_t receiver_tid; // ID потока-приемника
-    time_t last_activity_time; // Время последней активности (для Keep-Alive)
+    time_t last_activity_time; // Время последней АКТИВНОСТИ (получения сообщения)
 
-    // --- НОВЫЕ и ОБНОВЛЕННЫЕ поля для GUI ---
-    MessageType last_sent_msg_type;   // Тип последнего отправленного сообщения
-    uint16_t    last_sent_msg_num;    // Номер последнего отправленного сообщения
-    MessageType last_recv_msg_type;   // Тип последнего полученного сообщения
-    uint16_t    last_recv_msg_num;    // Номер последнего полученного сообщения
-    uint32_t    last_recv_bcb;        // Последний полученный BCB от этого SVM
-    // Убрали KLA, SLA, KSA для упрощения IPC, но можно вернуть при необходимости
+    // --- Поля для GUI и внутреннего отслеживания ---
+    MessageType last_sent_msg_type;   // Тип последнего отправленного UVM сообщения этому SVM
+    uint16_t    last_sent_msg_num;    // Номер последнего отправленного
+    time_t      last_sent_msg_time;   // Время последней отправки
 
-    // Флаги и значения ошибок/статусов сбоев
-    uint8_t     last_control_rsk;       // Последнее значение RSK из "Результаты контроля" (0xFF = не было)
-    uint8_t     last_warning_tks;       // Последний тип TKS из "Предупреждение" (0 = не было)
-    time_t      last_warning_time;      // Время последнего "Предупреждения"
+    MessageType last_recv_msg_type;   // Тип последнего полученного от SVM сообщения
+    uint16_t    last_recv_msg_num;    // Номер последнего полученного
+    time_t      last_recv_msg_time;   // Время последнего получения (дублирует last_activity_time, но можно оставить для явности)
 
-    bool        timeout_detected;         // true, если был зафиксирован Keep-Alive таймаут
-    bool        lak_mismatch_detected;    // true, если LAK в ConfirmInit не совпал
-    bool        control_failure_flag;     // true, если RSK указывал на ошибку контроля
+    uint32_t    last_recv_bcb;        // Последний BCB из сообщений SVM
+    // Поля для других счетчиков SVM, если решим их передавать (KLA, SLA, KSA)
+    // uint16_t    last_recv_kla;
+    // uint32_t    last_recv_sla_us100;
+    // uint16_t    last_recv_ksa;
 
-    // Для имитации отключения со стороны SVM (читается из конфига SVM и передается в GUI)
-    bool        simulating_disconnect_by_svm; // true, если SVM настроен на авто-отключение
-    int         svm_disconnect_countdown;     // Счетчик сообщений до отключения SVM (если > 0)
+    uint8_t     last_control_rsk;     // Последний RSK из "Результаты контроля" (0xFF если не было)
+    uint8_t     last_warning_tks;     // Последний TKS из "Предупреждение" (0 если не было)
+    time_t      last_warning_time;    // Время последнего предупреждения
 
+    // Флаги и счетчики для специфичных состояний/ошибок
+    bool        timeout_detected;         // Был ли таймаут keep-alive
+    bool        response_timeout_detected;// Был ли таймаут ожидания ответа на команду
+    bool        lak_mismatch_detected;    // Был ли неверный LAK в ответе
+    bool        control_failure_detected; // Был ли RSK != ожидаемого "ОК"
 } UvmSvmLink;
 
 
