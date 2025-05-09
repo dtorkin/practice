@@ -122,7 +122,7 @@ bool send_uvm_request(UvmRequest *request) {
     if (request->type == UVM_REQ_SEND_MESSAGE) {
         // Обновляем инфо о последнем отправленном сообщении ПОД МЬЮТЕКСОМ
         pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_CONFIGS) {
+        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
             UvmSvmLink *link = &svm_links[request->target_svm_id];
             if (link->status == UVM_LINK_ACTIVE) {
                  link->last_sent_msg_type = request->message.header.message_type;
@@ -152,7 +152,7 @@ bool send_uvm_request(UvmRequest *request) {
          char gui_msg_buffer[256];
          pthread_mutex_lock(&uvm_links_mutex); // Нужен LAK для лога
          LogicalAddress target_lak = 0;
-         if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_CONFIGS) {
+         if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
             target_lak = svm_links[request->target_svm_id].assigned_lak;
          }
          pthread_mutex_unlock(&uvm_links_mutex);
@@ -407,7 +407,7 @@ int main(int argc, char *argv[]) {
 	} // Инициализация мьютекса GUI
 
     // Инициализация массива svm_links
-	for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+	for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
 		svm_links[i].id = i;
 		svm_links[i].io_handle = NULL;
 		svm_links[i].connection_handle = -1;
@@ -746,7 +746,7 @@ int main(int argc, char *argv[]) {
 
 			// --- Обновление данных в svm_links[svm_id] и отправка в GUI ---
 			pthread_mutex_lock(&uvm_links_mutex);
-			if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+			if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
 				UvmSvmLink *link = &svm_links[svm_id];
 				if(link->status == UVM_LINK_ACTIVE) {
 					link->last_activity_time = time(NULL);
