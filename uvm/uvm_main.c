@@ -289,6 +289,7 @@ int main(int argc, char *argv[]) {
     int active_svm_count = 0;
     // Определяем переменную mode ЗДЕСЬ
     RadarMode mode = MODE_DR; // По умолчанию ДР
+	bool waitForGui = false;  // По умолчанию не ждем GUI
 
     // --- Парсинг аргументов командной строки ---
     // Проходим по всем аргументам, начиная с argv[1]
