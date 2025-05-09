@@ -6,23 +6,23 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>800</width>
-    <height>450</height> <!-- Немного увеличил высоту для BCB -->
+    <width>850</width> <!-- Немного расширил для истории -->
+    <height>600</height> <!-- Увеличил высоту для истории и ошибок -->
    </rect>
   </property>
   <property name="windowTitle">
    <string>UVM Monitor</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout_5">
+   <layout class="QGridLayout" name="gridLayout_Main">
     <item row="0" column="0">
      <widget class="QGroupBox" name="groupBox_0">
       <property name="title">
        <string>SVM 0</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout">
+      <layout class="QGridLayout" name="gridLayout_0">
        <item row="0" column="0">
-        <widget class="QLabel" name="labelStatus_0">
+        <widget class="QLabel" name="labelStatusText_0">
          <property name="text">
           <string>Status:</string>
          </property>
@@ -48,7 +48,7 @@
         </widget>
        </item>
        <item row="1" column="0">
-        <widget class="QLabel" name="labelLAK_0">
+        <widget class="QLabel" name="labelLAKText_0">
          <property name="text">
           <string>LAK:</string>
          </property>
@@ -62,47 +62,41 @@
         </widget>
        </item>
        <item row="2" column="0">
-        <widget class="QLabel" name="labelLastSent_0">
-         <property name="text">
-          <string>Last Sent:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueLastSent_0">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="labelLastRecv_0">
-         <property name="text">
-          <string>Last Recv:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1">
-        <widget class="QLabel" name="valueLastRecv_0">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Строка для BCB -->
-       <item row="4" column="0">
-        <widget class="QLabel" name="labelBCB_0">
+        <widget class="QLabel" name="labelBCBText_0">
          <property name="text">
           <string>BCB:</string>
          </property>
         </widget>
        </item>
-       <item row="4" column="1">
+       <item row="2" column="1">
         <widget class="QLabel" name="valueBCB_0">
          <property name="text">
           <string>0</string>
          </property>
         </widget>
+       </item>
+       <item row="3" column="0" colspan="2">
+        <widget class="QLabel" name="errorStatusLabel_0">
+         <property name="text">
+          <string>Errors: OK</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0" colspan="2">
+        <widget class="QLabel" name="labelHistory_0">
+         <property name="text">
+          <string>Message History:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0" colspan="2">
+        <widget class="QListWidget" name="historyList_0"/>
        </item>
       </layout>
      </widget>
@@ -112,9 +106,9 @@
       <property name="title">
        <string>SVM 1</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout_2">
+      <layout class="QGridLayout" name="gridLayout_1">
        <item row="0" column="0">
-        <widget class="QLabel" name="labelStatus_1">
+        <widget class="QLabel" name="labelStatusText_1">
          <property name="text">
           <string>Status:</string>
          </property>
@@ -140,7 +134,7 @@
         </widget>
        </item>
        <item row="1" column="0">
-        <widget class="QLabel" name="labelLAK_1">
+        <widget class="QLabel" name="labelLAKText_1">
          <property name="text">
           <string>LAK:</string>
          </property>
@@ -154,47 +148,41 @@
         </widget>
        </item>
        <item row="2" column="0">
-        <widget class="QLabel" name="labelLastSent_1">
-         <property name="text">
-          <string>Last Sent:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueLastSent_1">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="labelLastRecv_1">
-         <property name="text">
-          <string>Last Recv:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1">
-        <widget class="QLabel" name="valueLastRecv_1">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Строка для BCB -->
-       <item row="4" column="0">
-        <widget class="QLabel" name="labelBCB_1">
+        <widget class="QLabel" name="labelBCBText_1">
          <property name="text">
           <string>BCB:</string>
          </property>
         </widget>
        </item>
-       <item row="4" column="1">
+       <item row="2" column="1">
         <widget class="QLabel" name="valueBCB_1">
          <property name="text">
           <string>0</string>
          </property>
         </widget>
+       </item>
+       <item row="3" column="0" colspan="2">
+        <widget class="QLabel" name="errorStatusLabel_1">
+         <property name="text">
+          <string>Errors: OK</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0" colspan="2">
+        <widget class="QLabel" name="labelHistory_1">
+         <property name="text">
+          <string>Message History:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0" colspan="2">
+        <widget class="QListWidget" name="historyList_1"/>
        </item>
       </layout>
      </widget>
@@ -204,9 +192,9 @@
       <property name="title">
        <string>SVM 2</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout_3">
+      <layout class="QGridLayout" name="gridLayout_2">
        <item row="0" column="0">
-        <widget class="QLabel" name="labelStatus_2">
+        <widget class="QLabel" name="labelStatusText_2">
          <property name="text">
           <string>Status:</string>
          </property>
@@ -232,7 +220,7 @@
         </widget>
        </item>
        <item row="1" column="0">
-        <widget class="QLabel" name="labelLAK_2">
+        <widget class="QLabel" name="labelLAKText_2">
          <property name="text">
           <string>LAK:</string>
          </property>
@@ -246,47 +234,41 @@
         </widget>
        </item>
        <item row="2" column="0">
-        <widget class="QLabel" name="labelLastSent_2">
-         <property name="text">
-          <string>Last Sent:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueLastSent_2">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="labelLastRecv_2">
-         <property name="text">
-          <string>Last Recv:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1">
-        <widget class="QLabel" name="valueLastRecv_2">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Строка для BCB -->
-       <item row="4" column="0">
-        <widget class="QLabel" name="labelBCB_2">
+        <widget class="QLabel" name="labelBCBText_2">
          <property name="text">
           <string>BCB:</string>
          </property>
         </widget>
        </item>
-       <item row="4" column="1">
+       <item row="2" column="1">
         <widget class="QLabel" name="valueBCB_2">
          <property name="text">
           <string>0</string>
          </property>
         </widget>
+       </item>
+       <item row="3" column="0" colspan="2">
+        <widget class="QLabel" name="errorStatusLabel_2">
+         <property name="text">
+          <string>Errors: OK</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0" colspan="2">
+        <widget class="QLabel" name="labelHistory_2">
+         <property name="text">
+          <string>Message History:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0" colspan="2">
+        <widget class="QListWidget" name="historyList_2"/>
        </item>
       </layout>
      </widget>
@@ -296,9 +278,9 @@
       <property name="title">
        <string>SVM 3</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout_4">
+      <layout class="QGridLayout" name="gridLayout_3">
        <item row="0" column="0">
-        <widget class="QLabel" name="labelStatus_3">
+        <widget class="QLabel" name="labelStatusText_3">
          <property name="text">
           <string>Status:</string>
          </property>
@@ -324,7 +306,7 @@
         </widget>
        </item>
        <item row="1" column="0">
-        <widget class="QLabel" name="labelLAK_3">
+        <widget class="QLabel" name="labelLAKText_3">
          <property name="text">
           <string>LAK:</string>
          </property>
@@ -338,47 +320,41 @@
         </widget>
        </item>
        <item row="2" column="0">
-        <widget class="QLabel" name="labelLastSent_3">
-         <property name="text">
-          <string>Last Sent:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueLastSent_3">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="labelLastRecv_3">
-         <property name="text">
-          <string>Last Recv:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1">
-        <widget class="QLabel" name="valueLastRecv_3">
-         <property name="text">
-          <string>Type: - Num: -</string>
-         </property>
-        </widget>
-       </item>
-       <!-- Строка для BCB -->
-       <item row="4" column="0">
-        <widget class="QLabel" name="labelBCB_3">
+        <widget class="QLabel" name="labelBCBText_3">
          <property name="text">
           <string>BCB:</string>
          </property>
         </widget>
        </item>
-       <item row="4" column="1">
+       <item row="2" column="1">
         <widget class="QLabel" name="valueBCB_3">
          <property name="text">
           <string>0</string>
          </property>
         </widget>
+       </item>
+       <item row="3" column="0" colspan="2">
+        <widget class="QLabel" name="errorStatusLabel_3">
+         <property name="text">
+          <string>Errors: OK</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0" colspan="2">
+        <widget class="QLabel" name="labelHistory_3">
+         <property name="text">
+          <string>Message History:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="0" colspan="2">
+        <widget class="QListWidget" name="historyList_3"/>
        </item>
       </layout>
      </widget>

@@ -1,7 +1,37 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h" // Подключаем сгенерированный заголовок из .ui файла
+#include "ui_mainwindow.h"
 #include <QTimer>
 #include <QDebug>
+#include <QListWidget> // Включаем для QListWidget
+
+// --- Вспомогательная функция для имен типов сообщений (упрощенная) ---
+// В реальном приложении ее можно сделать более полной или брать из общего источника
+QString MainWindow::messageTypeToName(int type) {
+    // Это очень упрощенный пример, нужно будет расширить или использовать
+    // определения из protocol_defs.h, если они доступны в C++
+    switch (type) {
+        case 128: return "InitChan";
+        case 129: return "ConfInit";
+        case 1:   return "ProvKontr";
+        case 3:   return "PodtvKontr";
+        case 2:   return "VydRezKontr";
+        case 4:   return "RezKontr";
+        case 6:   return "VydSostLin";
+        case 7:   return "SostLin";
+        case 160: return "ParamSO";
+        case 200: return "Param3TSO";
+        case 161: return "TimeRef";
+        case 162: return "Reper";
+        case 170: return "ParamSDR";
+        case 210: return "ParamTSD";
+        case 255: return "NavData";
+        case 81:  return "Pomeha";
+        case 254: return "Predupr";
+        default:  return QString("T:%1").arg(type);
+    }
+}
+// --- Конец вспомогательной функции ---
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -11,77 +41,142 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Инициализируем массивы указателей на виджеты
     m_statusLabels << ui->valueStatus_0 << ui->valueStatus_1 << ui->valueStatus_2 << ui->valueStatus_3;
-    m_lakLabels << ui->valueLAK_0 << ui->valueLAK_1 << ui->valueLAK_2 << ui->valueLAK_3;
-    m_lastSentLabels << ui->valueLastSent_0 << ui->valueLastSent_1 << ui->valueLastSent_2 << ui->valueLastSent_3;
-    m_lastRecvLabels << ui->valueLastRecv_0 << ui->valueLastRecv_1 << ui->valueLastRecv_2 << ui->valueLastRecv_3;
-	m_bcbLabels << ui->valueBCB_0 << ui->valueBCB_1 << ui->valueBCB_2 << ui->valueBCB_3;
+    m_lakLabels    << ui->valueLAK_0    << ui->valueLAK_1    << ui->valueLAK_2    << ui->valueLAK_3;
+    m_bcbLabels    << ui->valueBCB_0    << ui->valueBCB_1    << ui->valueBCB_2    << ui->valueBCB_3;
+    m_historyWidgets << ui->historyList_0 << ui->historyList_1 << ui->historyList_2 << ui->historyList_3;
+    m_errorLabels  << ui->errorStatusLabel_0 << ui->errorStatusLabel_1 << ui->errorStatusLabel_2 << ui->errorStatusLabel_3;
+
 
     // Инициализируем начальное состояние
-    for(int i = 0; i < 4; ++i) {
-         m_statusLabels[i]->setText(statusToString(0)); // UVM_LINK_INACTIVE = 0
-         m_statusLabels[i]->setStyleSheet(statusToStyleSheet(0));
-         m_lakLabels[i]->setText("0x??");
-         m_lastSentLabels[i]->setText("Type: - Num: -");
-         m_lastRecvLabels[i]->setText("Type: - Num: -");
-		 m_bcbLabels[i]->setText("0"); // <-- ДОБАВИТЬ
+    for(int i = 0; i < m_statusLabels.size(); ++i) { // Используем m_statusLabels.size()
+         if (m_statusLabels[i]) m_statusLabels[i]->setText(statusToString(0)); // UVM_LINK_INACTIVE = 0
+         if (m_statusLabels[i]) m_statusLabels[i]->setStyleSheet(statusToStyleSheet(0));
+         if (m_lakLabels[i]) m_lakLabels[i]->setText("0x??");
+         if (m_bcbLabels[i]) m_bcbLabels[i]->setText("0");
+         if (m_errorLabels[i]) m_errorLabels[i]->setText("Status: OK");
+         if (m_historyWidgets[i]) m_historyWidgets[i]->clear(); // Очищаем историю
+
+         // Инициализируем предыдущие номера сообщений
+         m_prevSentNum[i] = -1; // Используем -1 как признак "еще не было"
+         m_prevRecvNum[i] = -1;
     }
 
 
     m_client = new UvmMonitorClient(this);
-
-    // Соединяем сигнал от клиента со слотом обновления GUI
     connect(m_client, &UvmMonitorClient::svmStatusUpdated, this, &MainWindow::updateSvmDisplay);
     connect(m_client, &UvmMonitorClient::connectionStatusChanged, this, &MainWindow::updateConnectionStatus);
 
-    // Запускаем подключение (можно сделать по кнопке)
-    m_client->connectToServer(); // Подключаемся сразу
-    // Или сразу: m_client->connectToServer();
-
-    ui->statusbar->showMessage("Connecting to UVM App...");
-
+    m_client->connectToServer();
+    ui->statusbar->showMessage("Attempting to connect to UVM App...");
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
-    // m_client удалится автоматически, т.к. this является его parent
 }
 
-// Слот обновления данных для одного SVM
 void MainWindow::updateSvmDisplay(const SvmStatusData &data)
 {
     int id = data.id;
-    if (id < 0 || id >= m_statusLabels.size()) {
-        qWarning() << "Received status for invalid ID:" << id;
+    if (id < 0 || id >= m_statusLabels.size() || !m_statusLabels[id]) { // Проверяем валидность виджетов
+        qWarning() << "Received status for invalid ID or UI not ready:" << id;
         return;
     }
 
-    // Обновляем виджеты
+    // Обновляем статус, LAK, BCB
     m_statusLabels[id]->setText(statusToString(data.status));
     m_statusLabels[id]->setStyleSheet(statusToStyleSheet(data.status));
-    m_lakLabels[id]->setText(QString("0x%1").arg(data.lak, 2, 16, QChar('0').toUpper()));
-    m_lastSentLabels[id]->setText(QString("Type: %1 Num: %2").arg(data.lastSentType).arg(data.lastSentNum));
-    m_lastRecvLabels[id]->setText(QString("Type: %1 Num: %2").arg(data.lastRecvType).arg(data.lastRecvNum));
-	m_bcbLabels[id]->setText(QString::number(data.bcb)); // Обновляем BCB
-    // Добавить обновление других полей...
+    m_lakLabels[id]->setText(QString("0x%1").arg(data.lak, 2, 16, QChar('0')).toUpper());
+    m_bcbLabels[id]->setText(QString::number(data.bcb));
+
+    // Обновляем историю сообщений
+    if (m_historyWidgets[id]) {
+        // Отправленные сообщения
+        if (data.lastSentNum >= 0 && data.lastSentNum != m_prevSentNum.value(id, -1)) {
+            QString sentMsg = QString("S > %1 (N:%2)")
+                                  .arg(messageTypeToName(data.lastSentType))
+                                  .arg(data.lastSentNum);
+            m_historyWidgets[id]->addItem(sentMsg);
+            m_prevSentNum[id] = data.lastSentNum;
+        }
+        // Полученные сообщения
+        if (data.lastRecvNum >= 0 && data.lastRecvNum != m_prevRecvNum.value(id, -1)) {
+            QString recvMsg = QString("R < %1 (N:%2)")
+                                  .arg(messageTypeToName(data.lastRecvType))
+                                  .arg(data.lastRecvNum);
+            m_historyWidgets[id]->addItem(recvMsg);
+            m_prevRecvNum[id] = data.lastRecvNum;
+        }
+
+        // Ограничиваем размер истории
+        while (m_historyWidgets[id]->count() > MAX_HISTORY_ITEMS) {
+            delete m_historyWidgets[id]->takeItem(0); // Удаляем самый старый элемент
+        }
+        m_historyWidgets[id]->scrollToBottom(); // Прокручиваем вниз
+    }
+
+    // Обновляем статус ошибок
+    if (m_errorLabels[id]) {
+        QString errorText = "Status: ";
+        bool hasError = false;
+        QString errorColor = "green";
+
+        if (data.status == 3 /*UVM_LINK_FAILED*/) { // Используем числовое значение enum UvmLinkStatus
+            errorText += "<font color='red'>FAILED</font>; ";
+            hasError = true;
+            errorColor = "lightcoral";
+        }
+        if (data.timeoutDetected) {
+            errorText += "<font color='red'>TIMEOUT</font>; ";
+            hasError = true;
+            errorColor = "lightcoral";
+        }
+        if (data.lakFailDetected) {
+            errorText += "<font color='red'>LAK Mismatch</font>; ";
+            hasError = true;
+            errorColor = "lightcoral";
+        }
+        if (data.ctrlFailDetected) { // data.rsk != 0xFF && data.rsk != 0x3F
+            errorText += QString("<font color='orange'>CtrlFail(RSK:0x%1)</font>; ").arg(data.rsk, 2, 16, QChar('0'));
+            hasError = true;
+            if (errorColor != "lightcoral") errorColor = "orange";
+        }
+        if (data.warnTKS != 0) {
+            errorText += QString("<font color='orange'>Warn(TKS:%1)</font>; ").arg(data.warnTKS);
+            hasError = true;
+             if (errorColor != "lightcoral") errorColor = "orange";
+        }
+        if (data.simDisconnect) {
+            errorText += QString("<font color='blue'>SimDisc(in %1)</font>; ").arg(data.discCountdown);
+            // не считаем ошибкой, просто информация
+        }
+
+        if (!hasError && data.status == 2 /*UVM_LINK_ACTIVE*/) {
+            errorText += "<font color='green'>OK</font>";
+        } else if (!hasError) {
+            errorText += "N/A"; // Если не активен и нет ошибок
+        }
+
+
+        m_errorLabels[id]->setText(errorText);
+        // Можно менять стиль всего errorLabels[id]
+        // m_errorLabels[id]->setStyleSheet(QString("background-color: %1;").arg(errorColor));
+    }
 }
 
-// Слот обновления статуса подключения к UVM
 void MainWindow::updateConnectionStatus(bool connected, const QString &message)
 {
      ui->statusbar->showMessage(message);
      if (!connected) {
-         // Сбросить отображение всех SVM в INACTIVE при разрыве связи с UVM
-         for(int i = 0; i < 4; ++i) {
-            SvmStatusData resetData;
-            resetData.id = i;
-            resetData.status = 0; // INACTIVE
-            resetData.lak = 0;
-            resetData.lastSentType = -1;
-            resetData.lastSentNum = -1;
-            resetData.lastRecvType = -1;
-            resetData.lastRecvNum = -1;
-            updateSvmDisplay(resetData);
+         for(int i = 0; i < m_statusLabels.size(); ++i) { // Используем m_statusLabels.size()
+            if (m_statusLabels[i]) m_statusLabels[i]->setText(statusToString(0)); // INACTIVE
+            if (m_statusLabels[i]) m_statusLabels[i]->setStyleSheet(statusToStyleSheet(0));
+            if (m_lakLabels[i]) m_lakLabels[i]->setText("0x??");
+            if (m_bcbLabels[i]) m_bcbLabels[i]->setText("0");
+            if (m_historyWidgets[i]) m_historyWidgets[i]->clear();
+            if (m_errorLabels[i]) m_errorLabels[i]->setText("Status: Disconnected");
+            m_prevSentNum[i] = -1;
+            m_prevRecvNum[i] = -1;
          }
      }
 }
