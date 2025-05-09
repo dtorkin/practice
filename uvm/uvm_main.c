@@ -290,27 +290,46 @@ int main(int argc, char *argv[]) {
     // Определяем переменную mode ЗДЕСЬ
     RadarMode mode = MODE_DR; // По умолчанию ДР
 
-    // --- Парсинг аргумента командной строки для выбора режима ---
-    if (argc > 1) {
-        printf("DEBUG UVM: Got mode argument: %s\n", argv[1]);
-        if (strcasecmp(argv[1], "OP") == 0) {
-             mode = MODE_OR; // <-- Присваиваем значение ЗДЕСЬ
-        } else if (strcasecmp(argv[1], "OR1") == 0) {
-             mode = MODE_OR1; // <-- Присваиваем значение ЗДЕСЬ
-        } else if (strcasecmp(argv[1], "DR") == 0) {
-             mode = MODE_DR; // <-- Присваиваем значение ЗДЕСЬ
-        } else if (strcasecmp(argv[1], "VR") == 0) {
-             mode = MODE_VR; // <-- Присваиваем значение ЗДЕСЬ
+    // --- Парсинг аргументов командной строки ---
+    // Проходим по всем аргументам, начиная с argv[1]
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--wait-for-gui") == 0) {
+            waitForGui = true;
+        } else if (strcasecmp(argv[i], "OR") == 0) {
+            mode = MODE_OR;
+        } else if (strcasecmp(argv[i], "OR1") == 0) {
+            mode = MODE_OR1;
+        } else if (strcasecmp(argv[i], "DR") == 0) {
+            mode = MODE_DR;
+        } else if (strcasecmp(argv[i], "VR") == 0) {
+            mode = MODE_VR;
         } else {
-             printf("UVM: Warning: Unknown mode '%s'. Using default DR.\n", argv[1]);
-             mode = MODE_DR; // Явно ставим дефолт
+            // Если аргумент не распознан как флаг или известный режим,
+            // можно вывести предупреждение или проигнорировать.
+            // Для простоты пока будем игнорировать неизвестные аргументы,
+            // кроме тех, что похожи на режимы, но не совпали по регистру (strcasecmp это покроет).
+            // Если это был первый аргумент и он не совпал ни с чем, mode останется дефолтным (DR).
+            if (i == 1) { // Если это первый аргумент и он не режим и не флаг
+                 printf("UVM: Warning: Unknown mode argument '%s'. Using default DR.\n", argv[i]);
+            } else {
+                 printf("UVM: Warning: Unknown argument '%s'. Ignored.\n", argv[i]);
+            }
         }
-    } else {
-         printf("DEBUG UVM: No mode argument provided. Using default DR.\n");
-         mode = MODE_DR; // Убедимся, что дефолт установлен
     }
-    // Отладочный вывод СРАЗУ ПОСЛЕ парсинга
-    printf("DEBUG UVM: Effective RadarMode selected: %d\n", mode); // Проверяем значение mode
+
+    if (waitForGui) {
+        printf("UVM: Option --wait-for-gui enabled. Will wait for GUI connection.\n");
+    }
+    // Если аргумент режима не был передан, mode останется MODE_DR (установлен по умолчанию)
+    if (argc <= 1 && !waitForGui) { // Если вообще нет аргументов
+         printf("DEBUG UVM: No mode argument provided. Using default DR.\n");
+    } else if (argc > 1 && !waitForGui && mode == MODE_DR && (strcasecmp(argv[1], "DR") !=0) && (strcmp(argv[1],"--wait-for-gui") !=0 ) ) {
+        // Если был один аргумент, он не --wait-for-gui, и mode все еще DR (значит, аргумент не был OR, OR1, VR)
+    }
+
+
+    printf("DEBUG UVM: Effective RadarMode selected: %d\n", mode);
+    // --- Конец блока парсинга ---
 
     // --- Инициализация ---
     if (pthread_mutex_init(&uvm_links_mutex, NULL) != 0) {
@@ -427,10 +446,10 @@ int main(int argc, char *argv[]) {
      printf("UVM: Connected to %d out of %d configured SVMs.\n", active_svm_count, num_svms_in_config);
 
     // --- Запуск потоков ---
-    printf("UVM: Запуск потоков Sender, Receiver(s) и GUI Server...\n"); // Обновлен лог
+    printf("UVM: Запуск потоков Sender, Receiver(s) и GUI Server...\n");
     if (pthread_create(&sender_tid, NULL, uvm_sender_thread_func, NULL) != 0) {
         perror("UVM: Failed to create sender thread");
-        goto cleanup_connections;
+        goto cleanup_connections; // Или другая метка очистки
     }
 
     // Запускаем Receiver'ы для активных соединений
@@ -439,18 +458,55 @@ int main(int argc, char *argv[]) {
         if (svm_links[i].status == UVM_LINK_ACTIVE) {
             if (pthread_create(&svm_links[i].receiver_tid, NULL, uvm_receiver_thread_func, &svm_links[i]) != 0) {
                 perror("UVM: Failed to create receiver thread");
-                svm_links[i].status = UVM_LINK_FAILED;
-                // Не останавливаем все, попробуем работать с остальными
+                svm_links[i].status = UVM_LINK_FAILED; // Помечаем как ошибку
+                // Можно добавить логику остановки уже запущенных потоков, если это критично
             }
         }
     }
     pthread_mutex_unlock(&uvm_links_mutex);
-	
-	// Запуск GUI сервера
+
+    // Запуск GUI сервера
     if (pthread_create(&gui_server_tid, NULL, gui_server_thread, NULL) != 0) {
-        perror("UVM: Failed to create GUI server thread"); gui_server_tid = 0;
+        perror("UVM: Failed to create GUI server thread");
+        gui_server_tid = 0; // Сбрасываем ID, чтобы не пытаться его join'ить
+                            // Не фатально, можно продолжить без GUI
     }
-    printf("UVM: Потоки запущены. Режим работы: %d\n", mode);
+    // --- Конец запуска потоков ---
+
+
+    // *************** УСЛОВНОЕ ОЖИДАНИЕ GUI ***************
+    if (waitForGui) {
+        printf("UVM: Waiting for GUI client to connect on port 12345 (or press Ctrl+C)...\n");
+        while (uvm_keep_running) { // Проверяем глобальный флаг завершения
+            pthread_mutex_lock(&gui_socket_mutex);
+            bool gui_connected = (gui_client_fd >= 0);
+            pthread_mutex_unlock(&gui_socket_mutex);
+
+            if (gui_connected) {
+                printf("UVM: GUI client connected! Proceeding with SVM operations.\n");
+                break; // GUI подключился, выходим из ожидания
+            }
+
+            // Короткая пауза с проверкой флага, чтобы не зависнуть и быстро отреагировать на Ctrl+C
+            bool still_running_check = false;
+            for (int k=0; k<5; ++k) { // Проверяем каждые 100мс, в сумме 0.5с
+                if (!uvm_keep_running) {
+                    still_running_check = true;
+                    break;
+                }
+                usleep(100000); // 0.1 секунды
+            }
+            if (still_running_check) break; // Выходим, если uvm_keep_running стал false
+        }
+        if (!uvm_keep_running && gui_client_fd < 0) { // Если вышли по Ctrl+C во время ожидания GUI
+             printf("UVM: Shutdown signaled while waiting for GUI.\n");
+             goto cleanup_threads; // Переход к завершению всех потоков
+        }
+    }
+    // ******************************************************
+
+    // Теперь эта строка точно после возможного ожидания GUI
+    printf("UVM: All necessary threads started. Selected RadarMode: %d\n", mode);
 
     // --- Основная логика UVM ---
     UvmRequest request;
