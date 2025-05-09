@@ -501,7 +501,7 @@ int main(int argc, char *argv[]) {
         }
         if (!uvm_keep_running && gui_client_fd < 0) { // Если вышли по Ctrl+C во время ожидания GUI
              printf("UVM: Shutdown signaled while waiting for GUI.\n");
-             goto cleanup_threads; // Переход к завершению всех потоков
+             goto cleanup_connections; // Переход к завершению всех потоков
         }
     }
     // ******************************************************
