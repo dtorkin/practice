@@ -27,7 +27,7 @@
 
 // --- Глобальные переменные ---
 AppConfig config;
-UvmSvmLink svm_links[MAX_SVM_CONFIGS]; // Используем MAX_SVM_CONFIGS
+UvmSvmLink svm_links[MAX_SVM_INSTANCES]; // Используем MAX_SVM_INSTANCES
 pthread_mutex_t uvm_links_mutex;
 
 ThreadSafeReqQueue *uvm_outgoing_request_queue = NULL;
@@ -119,7 +119,7 @@ bool send_uvm_request(UvmRequest *request) {
 
     if (request->type == UVM_REQ_SEND_MESSAGE) {
         pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_CONFIGS) {
+        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
             UvmSvmLink *link = &svm_links[request->target_svm_id];
             if (link->status == UVM_LINK_ACTIVE) {
                  link->last_sent_msg_type = request->message.header.message_type;
@@ -396,7 +396,7 @@ int main(int argc, char *argv[]) {
 	}
 
     // Инициализация svm_links
-    for (int i = 0; i < MAX_SVM_CONFIGS; ++i) {
+    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         svm_links[i].id = i;
         svm_links[i].io_handle = NULL;
         svm_links[i].connection_handle = -1;
