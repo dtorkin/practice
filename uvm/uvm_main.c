@@ -742,11 +742,6 @@ int main(int argc, char *argv[]) {
                      link->last_recv_msg_num = msg_num;
                      link->last_recv_msg_time = time(NULL);
 
-					snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-							 "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X", // LAK из заголовка ответа (адрес SVM)
-							 svm_id, msg->header.message_type, msg_num, msg->header.address);
-					send_to_gui_socket(gui_msg_buffer);
-
 					// Обновляем специфичные поля и отправляем EVENT для GUI
 					if (msg->header.message_type == MESSAGE_TYPE_CONFIRM_INIT && ntohs(msg->header.body_length) >= sizeof(ConfirmInitBody)) {
 						ConfirmInitBody *body = (ConfirmInitBody*)msg->body;
