@@ -451,14 +451,7 @@ int main(int argc, char *argv[]) {
 
          svm_links[i].status = UVM_LINK_CONNECTING;
          svm_links[i].assigned_lak = config.svm_settings[i].lak; // LAK из конфига SVM
-         // *************** ИНИЦИАЛИЗАЦИЯ ПАРАМЕТРОВ ИМИТАЦИИ ОТКЛЮЧЕНИЯ SVM ***************
-         // Эти параметры читаются из конфига SVM, uvm_app их знает и может отобразить
-         svm_links[i].simulating_disconnect_by_svm = (config.svm_settings[i].disconnect_after_messages > 0);
-         if (svm_links[i].simulating_disconnect_by_svm) {
-             svm_links[i].svm_disconnect_countdown = config.svm_settings[i].disconnect_after_messages;
-         } else {
-             svm_links[i].svm_disconnect_countdown = -1;
-         }
+
 
          EthernetConfig current_svm_config = {0};
          strncpy(current_svm_config.target_ip,
