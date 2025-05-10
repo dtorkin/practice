@@ -212,7 +212,7 @@ void MainWindow::onSaveLogAllClicked()
     QString dir = QFileDialog::getExistingDirectory(this, tr("Выберите директорию для сохранения логов"));
     if (dir.isEmpty()) return;
 
-    for (int i=0; i < MAX_SVM_GUI_INSTANCES; ++i) {
+    for (int i=0; i < MAX_GUI_SVM_INSTANCES; ++i) {
         if (m_logTables[i] && m_logTables[i]->rowCount() > 0) {
              QString filename = dir + QString("/svm_%1_log.txt").arg(i);
              QFile file(filename);
