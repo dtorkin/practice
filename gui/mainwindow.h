@@ -5,7 +5,7 @@
 #include <QVector>
 #include <QDateTime>
 
-#include "uvmmonitorclient.h" // Для сигналов
+#include "uvmmonitorclient.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -14,6 +14,13 @@ QT_END_NAMESPACE
 class QLabel;
 class QTableWidget;
 class QPushButton;
+
+// Для хранения предыдущих значений, чтобы не дублировать события SENT/RECV
+// Это уже не нужно, если uvm_app отправляет только новые события
+// struct LastMessageInfo {
+//     int type = -1;
+//     int num = -1;
+// };
 
 class MainWindow : public QMainWindow
 {
@@ -30,7 +37,7 @@ private slots:
                              int assignedLak, const QString& details);
 
     void updateConnectionStatus(bool connected, const QString& message);
-    void updateSvmLinkStatusDisplay(int svmId, int newStatus);
+    void updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLak); // Добавлен assignedLak
 
     void onSaveLogAllClicked();
 
@@ -45,13 +52,11 @@ private:
     QVector<QTableWidget*> m_logTables;
     QVector<QLabel*> m_errorDisplays;
 
-    // Для отслеживания последних номеров BCB, чтобы не дублировать его вывод
-    QVector<quint32> m_lastDisplayedBcb;
-
+    QVector<int> m_assignedLaks; // Храним назначенные LAK
 
     QString statusToString(int status);
     QString statusToStyleSheet(int status);
-    void saveTableLogToFile(int svmId, const QString& baseDir); // Добавлен аргумент директории
-    void initTableWidget(QTableWidget* table); // Вспомогательная функция для настройки таблицы
+    void saveTableLogToFile(int svmId, const QString& baseDir);
+    void initTableWidget(QTableWidget* table);
 };
 #endif // MAINWINDOW_H

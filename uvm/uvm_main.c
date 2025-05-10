@@ -127,13 +127,10 @@ bool send_uvm_request(UvmRequest *request) {
                  link->last_sent_msg_time = time(NULL);
 
                  // Формируем сообщение для GUI об отправке
-                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
-                          request->target_svm_id,
-                          request->message.header.message_type,
-                          link->last_sent_msg_num, // Используем уже полученный полный номер
-                          link->assigned_lak); // Используем назначенный LAK для этого линка
-                 send_to_gui_socket(gui_msg_buffer);
+				snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+						 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+						 i, svm_links[i].status, svm_links[i].assigned_lak);
+				send_to_gui_socket(gui_msg_buffer);
             }
         }
         pthread_mutex_unlock(&uvm_links_mutex);

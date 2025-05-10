@@ -1,19 +1,21 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
+#include "ui_mainwindow.h" // Генерируется из mainwindow.ui
 #include <QTimer>
 #include <QDebug>
 #include <QTableWidget>
-#include <QPushButton> // Для ui->buttonSaveAllLogs
+#include <QPushButton>
 #include <QFileDialog>
 #include <QFile>
 #include <QTextStream>
 #include <QHeaderView>
 
-const int MAX_GUI_SVM_INSTANCES = 4; // Соответствует MAX_SVM_CONFIGS
+// Константа для максимального количества отображаемых SVM (должна совпадать с MAX_SVM_INSTANCES в C-коде)
+const int MAX_GUI_SVM_INSTANCES = 4;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , m_assignedLaks(MAX_GUI_SVM_INSTANCES, -1) // Инициализируем LAKи значением "неизвестно"
     , m_lastDisplayedBcb(MAX_GUI_SVM_INSTANCES, 0) // Инициализируем нулями
 {
     ui->setupUi(this);
@@ -26,30 +28,38 @@ MainWindow::MainWindow(QWidget *parent)
     m_errorDisplays << ui->errorDisplay_0 << ui->errorDisplay_1 << ui->errorDisplay_2 << ui->errorDisplay_3;
 
     for(int i = 0; i < MAX_GUI_SVM_INSTANCES; ++i) {
-         if (m_statusLabels[i]) {
+         // Проверяем, что виджеты действительно существуют (если они созданы в .ui)
+         if (i < m_statusLabels.size() && m_statusLabels[i]) {
              m_statusLabels[i]->setText(statusToString(0)); // UVM_LINK_INACTIVE
              m_statusLabels[i]->setStyleSheet(statusToStyleSheet(0));
          }
-         if (m_lakLabels[i]) m_lakLabels[i]->setText("N/A");
-         if (m_bcbLabels[i]) m_bcbLabels[i]->setText("N/A");
-         if (m_errorDisplays[i]) {
+         if (i < m_lakLabels.size() && m_lakLabels[i]) m_lakLabels[i]->setText("N/A");
+         if (i < m_bcbLabels.size() && m_bcbLabels[i]) m_bcbLabels[i]->setText("N/A");
+         if (i < m_errorDisplays.size() && m_errorDisplays[i]) {
              m_errorDisplays[i]->setText("Status: OK");
-             m_errorDisplays[i]->setStyleSheet("color: green;");
+             m_errorDisplays[i]->setStyleSheet("color: green; font-style: italic;");
          }
-         if (m_logTables[i]) {
+         if (i < m_logTables.size() && m_logTables[i]) {
              initTableWidget(m_logTables[i]);
          }
     }
 
-    connect(ui->buttonSaveAllLogs, &QPushButton::clicked, this, &MainWindow::onSaveLogAllClicked);
+    // Подключаем сигнал от кнопки сохранения (предполагаем, что она есть в ui с objectName="buttonSaveAllLogs")
+    if (ui->buttonSaveAllLogs) {
+        connect(ui->buttonSaveAllLogs, &QPushButton::clicked, this, &MainWindow::onSaveLogAllClicked);
+    } else {
+        qWarning() << "Button 'buttonSaveAllLogs' not found in UI. Save functionality will not be available via button.";
+    }
+
 
     m_client = new UvmMonitorClient(this);
     connect(m_client, &UvmMonitorClient::newMessageOrEvent, this, &MainWindow::onNewMessageOrEvent);
     connect(m_client, &UvmMonitorClient::connectionStatusChanged, this, &MainWindow::updateConnectionStatus);
     connect(m_client, &UvmMonitorClient::svmLinkStatusChanged, this, &MainWindow::updateSvmLinkStatusDisplay);
 
-    m_client->connectToServer();
-    ui->statusbar->showMessage("Attempting to connect to UVM App...");
+    // Подключаемся к UVM App
+    m_client->connectToServer("127.0.0.1", 12345); // Хост и порт для IPC с uvm_app
+    ui->statusbar->showMessage("Attempting to connect to UVM App on localhost:12345...");
 }
 
 MainWindow::~MainWindow()
@@ -60,28 +70,30 @@ MainWindow::~MainWindow()
 void MainWindow::initTableWidget(QTableWidget* table) {
     if (!table) return;
     table->setColumnCount(7);
-    QStringList headers = {"Время", "Напр/Соб.", "LAK", "Тип", "Имя сообщ.", "Номер", "Детали/BCB"};
+    QStringList headers = {"Время", "Напр/Соб.", "LAK SVM", "Тип сообщ.", "Имя сообщ.", "Номер сообщ.", "Детали"};
     table->setHorizontalHeaderLabels(headers);
-    table->horizontalHeader()->setStretchLastSection(false); // Чтобы последний столбец не растягивался слишком сильно
+    table->horizontalHeader()->setStretchLastSection(true); // Последний столбец (Детали) растягивается
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table->setWordWrap(false);
-    table->setColumnWidth(0, 100); // Время
-    table->setColumnWidth(1, 80);  // Напр/Соб.
-    table->setColumnWidth(2, 60);  // LAK
-    table->setColumnWidth(3, 50);  // Тип
-    table->setColumnWidth(4, 180); // Имя
-    table->setColumnWidth(5, 60);  // Номер
-    table->setColumnWidth(6, 250); // Детали - пошире
-    table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк
+    table->setWordWrap(false); // Отключаем автоперенос в ячейках для краткости
+
+    // Примерная настройка ширины столбцов
+    table->setColumnWidth(0, 100); // Время (hh:mm:ss.zzz)
+    table->setColumnWidth(1, 80);  // Направление/Событие (SENT, RECV, EVENT)
+    table->setColumnWidth(2, 70);  // LAK SVM
+    table->setColumnWidth(3, 50);  // Тип сообщения (число)
+    table->setColumnWidth(4, 200); // Имя сообщения
+    table->setColumnWidth(5, 70);  // Номер сообщения
+    // table->setColumnWidth(6, 250); // Детали - будет растягиваться
+    table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк слева
 }
 
 void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
-                                   int assignedLak, const QString &details)
+                                   int targetLak, const QString &details) // targetLak - это LAK SVM для SENT/RECV
 {
-    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !m_logTables[svmId]) {
-        qWarning() << "Received message/event for invalid SVM ID:" << svmId;
+    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
+        qWarning() << "Received message/event for invalid SVM ID or uninitialized table:" << svmId;
         return;
     }
 
@@ -91,194 +103,183 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
 
     table->setItem(row, 0, new QTableWidgetItem(timestamp.toString("hh:mm:ss.zzz")));
     table->setItem(row, 1, new QTableWidgetItem(directionOrEventType));
-    table->setItem(row, 2, new QTableWidgetItem((assignedLak >=0) ? QString("0x%1").arg(assignedLak, 2, 16, QChar('0')).toUpper() : "N/A"));
-
-    QString detailsToShow = details; // Основные детали
+    // LAK SVM (целевой для SENT, или тот, что ответил для RECV/EVENT)
+    table->setItem(row, 2, new QTableWidgetItem((targetLak >=0) ? QString("0x%1").arg(targetLak, 2, 16, QChar('0')).toUpper() : "N/A"));
 
     if (directionOrEventType == "SENT" || directionOrEventType == "RECV") {
         table->setItem(row, 3, new QTableWidgetItem(QString::number(msgType)));
         table->setItem(row, 4, new QTableWidgetItem(msgName));
         table->setItem(row, 5, new QTableWidgetItem(QString::number(msgNum)));
+        table->setItem(row, 6, new QTableWidgetItem(details)); // Детали (могут содержать BCB, RSK и т.д.)
 
-        // Обновляем BCB QLabel, если это сообщение содержит BCB
-        // (UvmMonitorClient должен парсить BCB и передавать его, или мы парсим details здесь)
-        if (details.startsWith("BCB=")) { // Простой пример парсинга BCB из деталей
-            QString bcbValStr = details.mid(4);
+        // Обновляем отдельный QLabel для BCB, если детали содержат BCB
+        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && details.contains("BCB=")) {
             bool ok;
-            quint32 bcbVal = bcbValStr.toUInt(&ok);
-            if (ok && m_bcbLabels[svmId] && bcbVal != m_lastDisplayedBcb[svmId]) {
-                m_bcbLabels[svmId]->setText(QString::number(bcbVal));
-                m_lastDisplayedBcb[svmId] = bcbVal;
+            QStringList detailParts = details.split(QRegExp("[;,\\s]")); // Разделители: ; , или пробел
+            for(const QString& part : detailParts){
+                if(part.startsWith("BCB=")){
+                    quint32 bcbVal = part.mid(4).toUInt(&ok);
+                    if(ok && bcbVal != m_lastDisplayedBcb[svmId]) { // Обновляем, только если значение изменилось
+                        m_bcbLabels[svmId]->setText(QString::number(bcbVal));
+                        m_lastDisplayedBcb[svmId] = bcbVal;
+                    }
+                    break;
+                }
             }
         }
-        // Для SENT/RECV details могут быть пустыми или содержать что-то еще
     } else { // EVENT
-        table->setItem(row, 3, new QTableWidgetItem("-"));
-        table->setItem(row, 4, new QTableWidgetItem(directionOrEventType)); // Тип события как "имя"
-        table->setItem(row, 5, new QTableWidgetItem("-"));
-    }
-    table->setItem(row, 6, new QTableWidgetItem(detailsToShow));
-
-
-    // Обновляем LAK QLabel
-    if (m_lakLabels[svmId] && assignedLak >=0) {
-        m_lakLabels[svmId]->setText(QString("0x%1").arg(assignedLak, 2, 16, QChar('0')).toUpper());
+        table->setItem(row, 3, new QTableWidgetItem("-")); // Тип сообщения не применим
+        table->setItem(row, 4, new QTableWidgetItem(msgName)); // msgName здесь - это тип события
+        table->setItem(row, 5, new QTableWidgetItem("-")); // Номер сообщения не применим
+        table->setItem(row, 6, new QTableWidgetItem(details));
     }
 
-    // Обновляем errorDisplay
-    if (m_errorDisplays[svmId]) {
+    // Обновляем поле ошибки/последнего события
+    if (m_errorDisplays.size() > svmId && m_errorDisplays[svmId]) {
         if (directionOrEventType == "EVENT") {
-            m_errorDisplays[svmId]->setText(QString("%1: %2").arg(directionOrEventType).arg(details));
-            if (msgName.contains("Fail", Qt::CaseInsensitive) || msgName.contains("Error", Qt::CaseInsensitive) || msgName.contains("Timeout", Qt::CaseInsensitive)) {
-                m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic;");
+            QString eventText = QString("%1: %2").arg(msgName).arg(details);
+            m_errorDisplays[svmId]->setText(eventText);
+            if (msgName.contains("Fail", Qt::CaseInsensitive) || msgName.contains("Error", Qt::CaseInsensitive) || msgName.contains("Timeout", Qt::CaseInsensitive) || msgName.contains("Mismatch", Qt::CaseInsensitive)) {
+                m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic; padding: 2px;");
             } else if (msgName.contains("Warning", Qt::CaseInsensitive)) {
-                m_errorDisplays[svmId]->setStyleSheet("background-color: yellow; color: black; font-style: italic;");
-            } else { // Например, LinkStatus OK
-                 m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: italic;");
+                m_errorDisplays[svmId]->setStyleSheet("background-color: #FFFACD; color: black; font-style: italic; padding: 2px;"); // LemonChiffon
+            } else if (msgName == "LinkStatus" && details.contains("ACTIVE")) {
+                 m_errorDisplays[svmId]->setText("Status: OK");
+                 m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: normal;");
+            } else { // Другие информационные события
+                 m_errorDisplays[svmId]->setStyleSheet("color: blue; font-style: italic;");
             }
         }
-        // Не сбрасываем errorDisplay при обычных SENT/RECV, чтобы последняя ошибка была видна
+        // Не сбрасываем errorDisplay при обычных SENT/RECV, чтобы последняя ошибка/важное событие было видно,
+        // пока не придет новое событие LinkStatus=ACTIVE или другое информационное событие.
     }
 
     table->scrollToBottom();
-    if (table->rowCount() > 200) { // Ограничиваем историю
+    if (table->rowCount() > 200) { // Ограничиваем историю в таблице
         table->removeRow(0);
     }
 }
 
-void MainWindow::updateSvmLinkStatusDisplay(int svmId, int newStatus)
+void MainWindow::updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLakFromEvent)
 {
-    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !m_statusLabels[svmId] || !m_errorDisplays[svmId]) return;
+    if (svmId < 0 || svmId >= MAX_SVM_INSTANCES ) return;
 
-    m_statusLabels[svmId]->setText(statusToString(newStatus));
-    m_statusLabels[svmId]->setStyleSheet(statusToStyleSheet(newStatus));
-
-    // Обновляем errorDisplay на основе статуса
-    if (newStatus == 2 /*UVM_LINK_ACTIVE*/) {
-        m_errorDisplays[svmId]->setText("Status: OK");
-        m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: italic;");
-    } else if (newStatus == 3 /*UVM_LINK_FAILED*/) {
-        m_errorDisplays[svmId]->setText("Status: FAILED");
-        m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic;");
-    } else if (newStatus == 0 /*UVM_LINK_INACTIVE*/) {
-        m_errorDisplays[svmId]->setText("Status: INACTIVE");
-        m_errorDisplays[svmId]->setStyleSheet("color: gray; font-style: italic;");
+    if (m_statusLabels.size() > svmId && m_statusLabels[svmId]) {
+        m_statusLabels[svmId]->setText(statusToString(newStatus));
+        m_statusLabels[svmId]->setStyleSheet(statusToStyleSheet(newStatus));
     }
-    // Для других статусов можно добавить свои сообщения
+    if (m_lakLabels.size() > svmId && m_lakLabels[svmId] && assignedLakFromEvent >= 0) {
+        m_lakLabels[svmId]->setText(QString("0x%1").arg(assignedLakFromEvent, 2, 16, QChar('0')).toUpper());
+        m_assignedLaks[svmId] = assignedLakFromEvent; // Сохраняем LAK
+    }
+
+    // Обновляем errorDisplay на основе статуса, если нет более специфичного сообщения об ошибке
+    if (m_errorDisplays.size() > svmId && m_errorDisplays[svmId]) {
+        bool isErrorOrWarning = m_errorDisplays[svmId]->styleSheet().contains("lightcoral") ||
+                                m_errorDisplays[svmId]->styleSheet().contains("yellow");
+
+        if (newStatus == 2 /*UVM_LINK_ACTIVE*/ && !isErrorOrWarning) {
+            m_errorDisplays[svmId]->setText("Status: OK");
+            m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: normal;");
+        } else if (newStatus == 3 /*UVM_LINK_FAILED*/) {
+            m_errorDisplays[svmId]->setText("Status: FAILED");
+            m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic; padding: 2px;");
+        } else if (newStatus == 0 /*UVM_LINK_INACTIVE*/) {
+            m_errorDisplays[svmId]->setText("Status: INACTIVE");
+            m_errorDisplays[svmId]->setStyleSheet("color: gray; font-style: italic;");
+        }
+    }
 }
 
 void MainWindow::updateConnectionStatus(bool connected, const QString &message)
 {
      ui->statusbar->showMessage(message);
      if (!connected) {
-         for(int i = 0; i < MAX_GUI_SVM_INSTANCES; ++i) {
-            updateSvmLinkStatusDisplay(i, 0); // 0 = UVM_LINK_INACTIVE
-            if (m_lakLabels[i]) m_lakLabels[i]->setText("N/A");
-            if (m_bcbLabels[i]) m_bcbLabels[i]->setText("N/A");
-            if (m_errorDisplays[i]) m_errorDisplays[i]->setText("Disconnected from UVM App");
+         for(int i = 0; i < MAX_SVM_INSTANCES; ++i) {
+            // Вызываем updateSvmLinkStatusDisplay для сброса
+            updateSvmLinkStatusDisplay(i, 0, m_assignedLaks[i] >=0 ? m_assignedLaks[i] : -1); // 0 = UVM_LINK_INACTIVE
+            if (m_bcbLabels.size() > i && m_bcbLabels[i]) m_bcbLabels[i]->setText("N/A");
+            if (m_errorDisplays.size() > i && m_errorDisplays[i]) {
+                m_errorDisplays[i]->setText("UVM App Disconnected");
+                m_errorDisplays[i]->setStyleSheet("color: red; font-weight: bold;");
+            }
          }
      }
 }
 
-
-// Вспомогательная функция для преобразования статуса в строку
 QString MainWindow::statusToString(int status) {
     switch (status) {
-        case 0: return "INACTIVE";   // UVM_LINK_INACTIVE
-        case 1: return "CONNECTING"; // UVM_LINK_CONNECTING
-        case 2: return "ACTIVE";     // UVM_LINK_ACTIVE
-        case 3: return "FAILED";     // UVM_LINK_FAILED
-        case 4: return "DISCONNECTING"; // UVM_LINK_DISCONNECTING
+        case 0: return "INACTIVE";
+        case 1: return "CONNECTING";
+        case 2: return "ACTIVE";
+        case 3: return "FAILED";
+        case 4: return "DISCONNECTING";
+        case 5: return "WARNING"; // UVM_LINK_WARNING
         default: return "UNKNOWN";
     }
 }
 
-// Вспомогательная функция для получения стиля по статусу
 QString MainWindow::statusToStyleSheet(int status) {
      QString style = "padding: 2px; color: black; font-weight: bold;";
      switch (status) {
-         case 0: style += "background-color: lightgray;"; break; // INACTIVE
-         case 1: style += "background-color: yellow;"; break;    // CONNECTING
+         case 0: style += "background-color: lightgray;"; break;  // INACTIVE
+         case 1: style += "background-color: #FFE4B5;"; break;    // CONNECTING (Moccasin)
          case 2: style += "background-color: lightgreen;"; break; // ACTIVE
          case 3: style += "background-color: lightcoral;"; break;  // FAILED
-         case 4: style += "background-color: orange;"; break;   // DISCONNECTING
-         default: style += "background-color: white;"; break;   // UNKNOWN
+         case 4: style += "background-color: orange;"; break;     // DISCONNECTING
+         case 5: style += "background-color: yellow;"; break;     // WARNING
+         default: style += "background-color: white;"; break;     // UNKNOWN
      }
      return style;
 }
 
-void MainWindow::onSaveLogAllClicked()
-{
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Выберите директорию для сохранения логов"));
-    if (dir.isEmpty()) return;
+void MainWindow::onSaveLogAllClicked() {
+    QString baseDir = QFileDialog::getExistingDirectory(this, tr("Выберите директорию для сохранения логов"));
+    if (baseDir.isEmpty()) return;
 
-    for (int i=0; i < MAX_GUI_SVM_INSTANCES; ++i) {
-        if (m_logTables[i] && m_logTables[i]->rowCount() > 0) {
-             QString filename = dir + QString("/svm_%1_log.txt").arg(i);
-             QFile file(filename);
-             if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                 QTextStream out(&file);
-                 out << "Log for SVM " << i << " (LAK: " << (m_lakLabels[i] ? m_lakLabels[i]->text() : "N/A") << ")\n";
-                 out << "-------------------------------------------------------------------------------------------------\n";
-                 // Заголовки таблицы
-                 for (int col = 0; col < m_logTables[i]->columnCount(); ++col) {
-                     out << m_logTables[i]->horizontalHeaderItem(col)->text() << (col == m_logTables[i]->columnCount()-1 ? "" : "\t|\t");
-                 }
-                 out << "\n";
-                 out << "-------------------------------------------------------------------------------------------------\n";
-
-                 for (int row = 0; row < m_logTables[i]->rowCount(); ++row) {
-                     for (int col = 0; col < m_logTables[i]->columnCount(); ++col) {
-                         QTableWidgetItem *item = m_logTables[i]->item(row, col);
-                         out << (item ? item->text() : "") << (col == m_logTables[i]->columnCount()-1 ? "" : "\t|\t");
-                     }
-                     out << "\n";
-                 }
-                 file.close();
-                 qDebug() << "Log for SVM" << i << "saved to" << filename;
-             } else {
-                 qWarning() << "Failed to open file for SVM" << i << ":" << filename;
-             }
-        }
+    for (int i=0; i < MAX_SVM_INSTANCES; ++i) {
+        saveTableLogToFile(i, baseDir);
     }
-     ui->statusbar->showMessage("Logs saved to directory: " + dir, 5000);
+     ui->statusbar->showMessage("Logs saved to directory: " + baseDir, 5000);
 }
 
 void MainWindow::saveTableLogToFile(int svmId, const QString& baseDir) {
-    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !m_logTables[svmId] || m_logTables[svmId]->rowCount() == 0) {
+    if (svmId < 0 || svmId >= MAX_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId]) || m_logTables[svmId]->rowCount() == 0) {
+        qDebug() << "No log data to save for SVM ID" << svmId;
         return;
     }
 
-    QString filename = baseDir + QString("/svm_%1_log_%2.txt")
+    QString lakText = (m_assignedLaks[svmId] >= 0) ? QString("0x%1").arg(m_assignedLaks[svmId], 2, 16, QChar('0')).toUpper() : "N/A";
+    QString filename = baseDir + QString("/svm_%1_lak_%2_log_%3.txt")
                            .arg(svmId)
+                           .arg(lakText.remove("0x")) // Убираем "0x" для имени файла
                            .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss"));
     QFile file(filename);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) { // Truncate чтобы перезаписать
         QTextStream out(&file);
-        QString lakText = m_lakLabels[svmId] ? m_lakLabels[svmId]->text() : "N/A";
-        out << "Log for SVM " << svmId << " (LAK: " << lakText << ")\n";
+        out.setCodec("UTF-8"); // Устанавливаем кодировку
+
+        out << "Log for SVM " << svmId << " (Assigned LAK: " << lakText << ")\n";
         out << "========================================================================================================================\n";
 
-        // Заголовки таблицы
+        QStringList headers;
         for (int col = 0; col < m_logTables[svmId]->columnCount(); ++col) {
-            out << m_logTables[svmId]->horizontalHeaderItem(col)->text()
-                << (col == m_logTables[svmId]->columnCount()-1 ? "" : "\t|\t");
+            headers << m_logTables[svmId]->horizontalHeaderItem(col)->text();
         }
-        out << "\n";
+        out << headers.join("\t|\t") << "\n";
         out << "------------------------------------------------------------------------------------------------------------------------\n";
 
-        // Данные
         for (int row = 0; row < m_logTables[svmId]->rowCount(); ++row) {
+            QStringList rowData;
             for (int col = 0; col < m_logTables[svmId]->columnCount(); ++col) {
                 QTableWidgetItem *item = m_logTables[svmId]->item(row, col);
-                out << (item ? item->text().replace("\n", " ") : "") // Заменяем переводы строк в деталях
-                    << (col == m_logTables[svmId]->columnCount()-1 ? "" : "\t|\t");
+                rowData << (item ? item->text().replace("\n", " ") : "");
             }
-            out << "\n";
+            out << rowData.join("\t|\t") << "\n";
         }
         file.close();
         qDebug() << "Log for SVM" << svmId << "saved to" << filename;
-        ui->statusbar->showMessage(QString("Log for SVM %1 saved.").arg(svmId), 3000);
+        // ui->statusbar->showMessage(QString("Log for SVM %1 saved.").arg(svmId), 3000); // Будет перезаписано общим сообщением
     } else {
         qWarning() << "Failed to open file for SVM" << svmId << ":" << filename << "Error:" << file.errorString();
         ui->statusbar->showMessage(QString("Failed to save log for SVM %1!").arg(svmId), 5000);

@@ -60,7 +60,7 @@ signals:
     // Сигнал об изменении статуса подключения к uvm_app
     void connectionStatusChanged(bool connected, const QString& message);
     // Сигнал для обновления общего статуса SVM (например, ACTIVE/FAILED)
-    void svmLinkStatusChanged(int svmId, int newStatus);
+    void svmLinkStatusChanged(int svmId, int newStatus, int assignedLak);
 
 
 private slots:
