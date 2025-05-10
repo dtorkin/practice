@@ -125,27 +125,30 @@ void UvmMonitorClient::parseData(const QByteArray& data)
          return;
      }
 
-     QString directionOrEventType = parts[0].trimmed();
+     QString eventDirectionOrType = parts[0].trimmed(); // SENT, RECV, EVENT
      int svmId = -1;
      int msgType = -1;
      QString msgName = "N/A";
      int msgNum = -1;
-     int lak = -1;
-     QString detailsStr = ""; // Для EVENT details или для SENT/RECV payload info
+     int lak = -1; // LAK, пришедший в строке (может быть LAK SVM для SENT или LAK UVM для RECV)
+     QString detailsStr = "";
      QDateTime timestamp = QDateTime::currentDateTime();
 
      QMap<QString, QString> fieldsMap;
      for (int i = 1; i < parts.size(); ++i) {
-         QStringList key_value = parts[i].split(':', Qt::SkipEmptyParts); // Qt6: QString::SkipEmptyParts
-         if (key_value.size() == 2) {
-             fieldsMap.insert(key_value[0].trimmed(), key_value[1].trimmed());
-         } else if (!parts[i].trimmed().isEmpty()){
-             // Если это последний элемент и он не содержит ':', это могут быть Details
-             if (i == parts.size() -1 && !parts[i].contains(':')) {
-                 fieldsMap.insert("Details", parts[i].trimmed()); // Предполагаем, что это детали
-             } else {
-                 qWarning() << "IPC: Malformed field:" << parts[i] << "in line:" << line;
-             }
+         QString part = parts[i].trimmed();
+         if (part.isEmpty()) continue; // Пропускаем пустые части
+
+         int colonPos = part.indexOf(':');
+         if (colonPos > 0) { // Убедимся, что ':' не первый символ и есть
+             QString key = part.left(colonPos).trimmed();
+             QString value = part.mid(colonPos + 1).trimmed();
+             fieldsMap.insert(key, value);
+         } else if (i == parts.size() - 1 && eventDirectionOrType == "EVENT") {
+             // Если это последний элемент в EVENT и нет ':', считаем его деталями
+             fieldsMap.insert("Details", part);
+         } else {
+             qWarning() << "IPC: Malformed field part:" << part << "in line:" << line;
          }
      }
 
@@ -159,43 +162,70 @@ void UvmMonitorClient::parseData(const QByteArray& data)
 
      if (fieldsMap.contains("Type")) {
          msgType = fieldsMap.value("Type").toInt(&ok);
-         if (!ok) msgType = -1; // Ошибка парсинга
+         if (!ok && eventDirectionOrType != "EVENT") { // Для EVENT msgType может быть строкой
+             qWarning() << "IPC: Failed to parse MsgType for SVM" << svmId << ":" << fieldsMap.value("Type");
+             msgType = -1;
+         }
      }
      if (fieldsMap.contains("Num")) {
          msgNum = fieldsMap.value("Num").toInt(&ok);
          if (!ok) msgNum = -1;
      }
      if (fieldsMap.contains("LAK")) {
-         lak = fieldsMap.value("LAK").toUInt(&ok, 0); // 0 для автоопределения (0x)
-         if (!ok) lak = -1;
+         QString lakStr = fieldsMap.value("LAK");
+         // toUInt с базой 0 автоматически определяет 0x
+         lak = lakStr.toUInt(&ok, 0);
+         if (!ok) {
+             qWarning() << "IPC: Failed to parse LAK for SVM" << svmId << ":" << lakStr;
+             lak = -1;
+         }
      }
      if (fieldsMap.contains("Details")) {
          detailsStr = fieldsMap.value("Details");
      }
 
-     if (msgType != -1 && (directionOrEventType == "SENT" || directionOrEventType == "RECV")) {
-         msgName = getMessageNameByType(msgType);
-     } else if (directionOrEventType == "EVENT" && msgType != -1) { // Для EVENT, msgType - это код статуса/ошибки
-         msgName = fieldsMap.value("Type"); // Имя события уже в msgName
+     if (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") {
+         if (msgType != -1) {
+             msgName = getMessageNameByType(msgType);
+         } else {
+             msgName = "Invalid Type";
+         }
+     } else if (eventDirectionOrType == "EVENT") {
+         // Для EVENT, "Type" из fieldsMap - это имя события
+         if (fieldsMap.contains("Type")) {
+             msgName = fieldsMap.value("Type");
+         } else {
+             msgName = "Unknown Event";
+         }
+         // msgType для EVENT не используется для имени, msgNum тоже
+         msgType = -1; // Установим в невалидное значение для EVENT
+         msgNum = -1;
+     } else {
+         qWarning() << "IPC: Unknown message main type:" << eventDirectionOrType << "Full line:" << line;
+         return;
      }
 
-
-     emit newMessageOrEvent(svmId, timestamp, directionOrEventType, msgType, msgName, msgNum, lak, detailsStr);
+     // Для SENT/RECV передаем lak из строки. Для EVENT, lak нерелевантен в этом сигнале.
+     // AssignedLAK будет передан через svmLinkStatusChanged.
+     emit newMessageOrEvent(svmId, timestamp, eventDirectionOrType, msgType, msgName, msgNum,
+                            (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") ? lak : -1,
+                            detailsStr);
 
      // Отдельный сигнал для LinkStatus, если он был передан как EVENT
-     if(directionOrEventType == "EVENT" && msgName == "LinkStatus") {
-         // Details для LinkStatus ожидается как "NewStatus=X,AssignedLAK=Y"
+     if(eventDirectionOrType == "EVENT" && msgName == "LinkStatus") {
          int newStatus = -1;
-         int assignedLakFromEvent = -1;
+         int assignedLakFromEvent = -1; // Это LAK самого SVM
          QStringList detailParts = detailsStr.split(',');
          for(const QString& part : detailParts) {
              QStringList kv = part.split('=');
              if (kv.size() == 2) {
-                 if (kv[0].trimmed() == "NewStatus") {
-                     newStatus = kv[1].trimmed().toInt(&ok);
+                 QString key = kv[0].trimmed();
+                 QString val = kv[1].trimmed();
+                 if (key == "NewStatus") {
+                     newStatus = val.toInt(&ok);
                      if (!ok) newStatus = -1;
-                 } else if (kv[0].trimmed() == "AssignedLAK") {
-                     assignedLakFromEvent = kv[1].trimmed().toUInt(&ok, 0);
+                 } else if (key == "AssignedLAK") {
+                     assignedLakFromEvent = val.toUInt(&ok, 0); // Парсим как hex/dec
                      if (!ok) assignedLakFromEvent = -1;
                  }
              }

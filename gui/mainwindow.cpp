@@ -168,9 +168,9 @@ void MainWindow::updateSvmLinkStatusDisplay(int svmId, int newStatus, int assign
         m_statusLabels[svmId]->setText(statusToString(newStatus));
         m_statusLabels[svmId]->setStyleSheet(statusToStyleSheet(newStatus));
     }
-    if (m_lakLabels.size() > svmId && m_lakLabels[svmId] && assignedLakFromEvent >= 0) {
-        m_lakLabels[svmId]->setText(QString("0x%1").arg(assignedLakFromEvent, 2, 16, QChar('0')).toUpper());
-        m_assignedLaks[svmId] = assignedLakFromEvent; // Сохраняем LAK
+    if (m_lakLabels.size() > svmId && m_lakLabels[svmId] && assignedLak >= 0) {
+        m_lakLabels[svmId]->setText(QString("0x%1").arg(assignedLak, 2, 16, QChar('0')).toUpper());
+        m_assignedLaks[svmId] = assignedLak; // Сохраняем для лога
     }
 
     // Обновляем errorDisplay на основе статуса, если нет более специфичного сообщения об ошибке

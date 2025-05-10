@@ -260,9 +260,10 @@ void* gui_server_thread(void* arg) {
 
             pthread_mutex_lock(&uvm_links_mutex); // Блокируем доступ к svm_links
             // 1. Отправляем текущий статус линка
-            snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                     "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d", i, svm_links[i].status);
-            send_to_gui_socket(gui_msg_buffer);
+			snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+					 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", // <-- LAK здесь
+					 i, svm_links[i].status, svm_links[i].assigned_lak);
+			send_to_gui_socket(gui_msg_buffer);
 
             // 2. Отправляем информацию о последнем отправленном сообщении UVM
             if (svm_links[i].last_sent_msg_time > 0) { // Если было отправлено хоть что-то

@@ -37,7 +37,7 @@ private slots:
                              int assignedLak, const QString& details);
 
     void updateConnectionStatus(bool connected, const QString& message);
-    void updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLak); // Добавлен assignedLak
+    void updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLak);
 
     void onSaveLogAllClicked();
 
