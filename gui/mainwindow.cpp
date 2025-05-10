@@ -88,7 +88,7 @@ void MainWindow::initTableWidget(QTableWidget* table) {
     table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк слева
 }
 
-void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime ×tamp, const QString &directionOrEventType,
+void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
                                    int lakFromIPC, const QString &details) // lakFromIPC - это LAK, пришедший из IPC строки
 {
@@ -162,22 +162,29 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime ×tamp, const QS
          }
     }
 
-    // Обновляем errorDisplay
+
+    // Обновляем поле ошибки/последнего события
     if (m_errorDisplays.size() > svmId && m_errorDisplays[svmId]) {
         if (directionOrEventType == "EVENT") {
             QString eventText = QString("%1: %2").arg(msgName).arg(details);
             m_errorDisplays[svmId]->setText(eventText);
-            // Установка стиля для errorDisplay (как раньше)
-            if (msgName.contains("Fail", Qt::CaseInsensitive) || /*...*/) { /*...*/ }
-            else if (msgName.contains("Warning", Qt::CaseInsensitive)) { /*...*/ }
-            else if (msgName == "LinkStatus" && details.contains("NewStatus=2")) { /*...*/ } // 2 = ACTIVE
-            else { /*...*/ }
+            if (msgName.contains("Fail", Qt::CaseInsensitive) || msgName.contains("Error", Qt::CaseInsensitive) || msgName.contains("Timeout", Qt::CaseInsensitive) || msgName.contains("Mismatch", Qt::CaseInsensitive)) {
+                m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic; padding: 2px;");
+            } else if (msgName.contains("Warning", Qt::CaseInsensitive)) {
+                m_errorDisplays[svmId]->setStyleSheet("background-color: #FFFACD; color: black; font-style: italic; padding: 2px;"); // LemonChiffon
+            } else if (msgName == "LinkStatus" && details.contains("ACTIVE")) {
+                 m_errorDisplays[svmId]->setText("Status: OK");
+                 m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: normal;");
+            } else { // Другие информационные события
+                 m_errorDisplays[svmId]->setStyleSheet("color: blue; font-style: italic;");
+            }
         }
-        // Не сбрасываем errorDisplay при обычных SENT/RECV
+        // Не сбрасываем errorDisplay при обычных SENT/RECV, чтобы последняя ошибка/важное событие было видно,
+        // пока не придет новое событие LinkStatus=ACTIVE или другое информационное событие.
     }
 
     table->scrollToBottom();
-    if (table->rowCount() > 200) {
+    if (table->rowCount() > 200) { // Ограничиваем историю в таблице
         table->removeRow(0);
     }
 }
