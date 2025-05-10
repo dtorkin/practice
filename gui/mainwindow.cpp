@@ -270,40 +270,6 @@ void MainWindow::onSaveLogAllClicked()
      ui->statusbar->showMessage("Logs saved to directory: " + dir, 5000);
 }
 
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Выберите директорию для сохранения логов"));
-    if (dir.isEmpty()) return;
-
-    for (int i=0; i < MAX_GUI_SVM_INSTANCES; ++i) {
-        if (m_logTables[i] && m_logTables[i]->rowCount() > 0) {
-             QString filename = dir + QString("/svm_%1_log.txt").arg(i);
-             QFile file(filename);
-             if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                 QTextStream out(&file);
-                 out << "Log for SVM " << i << " (LAK: " << (m_lakLabels[i] ? m_lakLabels[i]->text() : "N/A") << ")\n";
-                 out << "-------------------------------------------------------------------------------------------------\n";
-                 // Заголовки таблицы
-                 for (int col = 0; col < m_logTables[i]->columnCount(); ++col) {
-                     out << m_logTables[i]->horizontalHeaderItem(col)->text() << (col == m_logTables[i]->columnCount()-1 ? "" : "\t|\t");
-                 }
-                 out << "\n";
-                 out << "-------------------------------------------------------------------------------------------------\n";
-
-                 for (int row = 0; row < m_logTables[i]->rowCount(); ++row) {
-                     for (int col = 0; col < m_logTables[i]->columnCount(); ++col) {
-                         QTableWidgetItem *item = m_logTables[i]->item(row, col);
-                         out << (item ? item->text() : "") << (col == m_logTables[i]->columnCount()-1 ? "" : "\t|\t");
-                     }
-                     out << "\n";
-                 }
-                 file.close();
-                 qDebug() << "Log for SVM" << i << "saved to" << filename;
-             } else {
-                 qWarning() << "Failed to open file for SVM" << i << ":" << filename;
-             }
-        }
-	}
-}
-
 void MainWindow::saveTableLogToFile(int svmId, const QString& baseDir) {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId]) || m_logTables[svmId]->rowCount() == 0) {
         qDebug() << "No log data to save for SVM ID" << svmId;
