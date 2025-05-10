@@ -53,6 +53,8 @@ private:
     QVector<QLabel*> m_errorDisplays;
 
     QVector<int> m_assignedLaks; // Храним назначенные LAK
+	
+	QVector<quint32> m_lastDisplayedBcb; // Для отслеживания последнего отображенного BCB
 
     QString statusToString(int status);
     QString statusToStyleSheet(int status);

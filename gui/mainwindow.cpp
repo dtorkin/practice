@@ -9,7 +9,7 @@
 #include <QTextStream>
 #include <QHeaderView>
 
-// Константа для максимального количества отображаемых SVM (должна совпадать с MAX_SVM_INSTANCES в C-коде)
+// Константа для максимального количества отображаемых SVM (должна совпадать с MAX_GUI_SVM_INSTANCES в C-коде)
 const int MAX_GUI_SVM_INSTANCES = 4;
 
 MainWindow::MainWindow(QWidget *parent)
@@ -162,7 +162,7 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
 
 void MainWindow::updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLakFromEvent)
 {
-    if (svmId < 0 || svmId >= MAX_SVM_INSTANCES ) return;
+    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES ) return;
 
     if (m_statusLabels.size() > svmId && m_statusLabels[svmId]) {
         m_statusLabels[svmId]->setText(statusToString(newStatus));
@@ -195,7 +195,7 @@ void MainWindow::updateConnectionStatus(bool connected, const QString &message)
 {
      ui->statusbar->showMessage(message);
      if (!connected) {
-         for(int i = 0; i < MAX_SVM_INSTANCES; ++i) {
+         for(int i = 0; i < MAX_GUI_SVM_INSTANCES; ++i) {
             // Вызываем updateSvmLinkStatusDisplay для сброса
             updateSvmLinkStatusDisplay(i, 0, m_assignedLaks[i] >=0 ? m_assignedLaks[i] : -1); // 0 = UVM_LINK_INACTIVE
             if (m_bcbLabels.size() > i && m_bcbLabels[i]) m_bcbLabels[i]->setText("N/A");
@@ -237,14 +237,14 @@ void MainWindow::onSaveLogAllClicked() {
     QString baseDir = QFileDialog::getExistingDirectory(this, tr("Выберите директорию для сохранения логов"));
     if (baseDir.isEmpty()) return;
 
-    for (int i=0; i < MAX_SVM_INSTANCES; ++i) {
+    for (int i=0; i < MAX_GUI_SVM_INSTANCES; ++i) {
         saveTableLogToFile(i, baseDir);
     }
      ui->statusbar->showMessage("Logs saved to directory: " + baseDir, 5000);
 }
 
 void MainWindow::saveTableLogToFile(int svmId, const QString& baseDir) {
-    if (svmId < 0 || svmId >= MAX_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId]) || m_logTables[svmId]->rowCount() == 0) {
+    if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId]) || m_logTables[svmId]->rowCount() == 0) {
         qDebug() << "No log data to save for SVM ID" << svmId;
         return;
     }
