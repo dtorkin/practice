@@ -119,18 +119,22 @@ bool send_uvm_request(UvmRequest *request) {
 
     if (request->type == UVM_REQ_SEND_MESSAGE) {
         pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
-            UvmSvmLink *link = &svm_links[request->target_svm_id];
+        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES
+            UvmSvmLink *link = &svm_links[request->target_svm_id]; // Получаем указатель на link
             if (link->status == UVM_LINK_ACTIVE) {
                  link->last_sent_msg_type = request->message.header.message_type;
                  link->last_sent_msg_num = get_full_message_number(&request->message.header);
                  link->last_sent_msg_time = time(NULL);
 
-                 // Формируем сообщение для GUI об отправке
-				snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-						 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
-						 i, svm_links[i].status, svm_links[i].assigned_lak);
-				send_to_gui_socket(gui_msg_buffer);
+                 // --- ИСПРАВЛЕННЫЙ БЛОК ДЛЯ GUI ---
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X", // Сообщение типа SENT
+                          request->target_svm_id,                     // Используем target_svm_id
+                          request->message.header.message_type,       // Тип отправляемого сообщения
+                          link->last_sent_msg_num,                    // Номер отправляемого (уже обновлен)
+                          link->assigned_lak);                        // LAK этого линка
+                 send_to_gui_socket(gui_msg_buffer);
+                 // --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
             }
         }
         pthread_mutex_unlock(&uvm_links_mutex);
