@@ -6,357 +6,158 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>850</width> <!-- Немного расширил для истории -->
-    <height>600</height> <!-- Увеличил высоту для истории и ошибок -->
+    <width>900</width> <!-- Увеличил ширину -->
+    <height>700</height> <!-- Увеличил высоту -->
    </rect>
   </property>
   <property name="windowTitle">
    <string>UVM Monitor</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout_Main">
-    <item row="0" column="0">
-     <widget class="QGroupBox" name="groupBox_0">
-      <property name="title">
-       <string>SVM 0</string>
-      </property>
-      <layout class="QGridLayout" name="gridLayout_0">
-       <item row="0" column="0">
-        <widget class="QLabel" name="labelStatusText_0">
-         <property name="text">
-          <string>Status:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QLabel" name="valueStatus_0">
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">padding: 2px; background-color: lightgray; color: black;</string>
-         </property>
-         <property name="text">
-          <string>INACTIVE</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="labelLAKText_0">
-         <property name="text">
-          <string>LAK:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QLabel" name="valueLAK_0">
-         <property name="text">
-          <string>0x??</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="labelBCBText_0">
-         <property name="text">
-          <string>BCB:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueBCB_0">
-         <property name="text">
-          <string>0</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0" colspan="2">
-        <widget class="QLabel" name="errorStatusLabel_0">
-         <property name="text">
-          <string>Errors: OK</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="2">
-        <widget class="QLabel" name="labelHistory_0">
-         <property name="text">
-          <string>Message History:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="5" column="0" colspan="2">
-        <widget class="QListWidget" name="historyList_0"/>
-       </item>
-      </layout>
-     </widget>
+   <layout class="QVBoxLayout" name="mainLayout"> <!-- Главный макет - вертикальный -->
+    <item>
+     <layout class="QGridLayout" name="gridLayout_Panels"> <!-- Макет для панелей SVM -->
+      <item row="0" column="0">
+       <widget class="QGroupBox" name="groupBox_0">
+        <property name="title">
+         <string>SVM 0</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_0">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_Status0">
+           <item><widget class="QLabel" name="labelStatus_0"><property name="text"><string>Status:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueStatus_0"><property name="font"><font><weight>75</weight><bold>true</bold></font></property><property name="styleSheet"><string notr="true">padding: 2px; background-color: lightgray; color: black;</string></property><property name="text"><string>INACTIVE</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
+           <item><widget class="QLabel" name="labelLAK_0"><property name="text"><string>LAK:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueLAK_0"><property name="text"><string>0x??</string></property></widget></item>
+           <item><widget class="QLabel" name="labelBCB_0"><property name="text"><string>BCB:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueBCB_0"><property name="text"><string>0</string></property></widget></item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QLabel" name="errorDisplay_0">
+           <property name="text"><string>Status: OK</string></property>
+           <property name="styleSheet"><string notr="true">color: green; font-style: italic;</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QTableWidget" name="tableLog_0">
+           <property name="editTriggers">
+            <set>QAbstractItemView::NoEditTriggers</set>
+           </property>
+           <property name="selectionBehavior">
+            <enum>QAbstractItemView::SelectRows</enum>
+           </property>
+           <property name="wordWrap">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QGroupBox" name="groupBox_1">
+        <property name="title">
+         <string>SVM 1</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_1">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_Status1">
+           <item><widget class="QLabel" name="labelStatus_1"><property name="text"><string>Status:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueStatus_1"><property name="font"><font><weight>75</weight><bold>true</bold></font></property><property name="styleSheet"><string notr="true">padding: 2px; background-color: lightgray; color: black;</string></property><property name="text"><string>INACTIVE</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
+           <item><widget class="QLabel" name="labelLAK_1"><property name="text"><string>LAK:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueLAK_1"><property name="text"><string>0x??</string></property></widget></item>
+           <item><widget class="QLabel" name="labelBCB_1"><property name="text"><string>BCB:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueBCB_1"><property name="text"><string>0</string></property></widget></item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QLabel" name="errorDisplay_1">
+           <property name="text"><string>Status: OK</string></property>
+           <property name="styleSheet"><string notr="true">color: green; font-style: italic;</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QTableWidget" name="tableLog_1">
+           <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+           <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+           <property name="wordWrap"><bool>false</bool></property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QGroupBox" name="groupBox_2">
+        <property name="title">
+         <string>SVM 2</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_Status2">
+           <item><widget class="QLabel" name="labelStatus_2"><property name="text"><string>Status:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueStatus_2"><property name="font"><font><weight>75</weight><bold>true</bold></font></property><property name="styleSheet"><string notr="true">padding: 2px; background-color: lightgray; color: black;</string></property><property name="text"><string>INACTIVE</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
+           <item><widget class="QLabel" name="labelLAK_2"><property name="text"><string>LAK:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueLAK_2"><property name="text"><string>0x??</string></property></widget></item>
+           <item><widget class="QLabel" name="labelBCB_2"><property name="text"><string>BCB:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueBCB_2"><property name="text"><string>0</string></property></widget></item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QLabel" name="errorDisplay_2">
+           <property name="text"><string>Status: OK</string></property>
+           <property name="styleSheet"><string notr="true">color: green; font-style: italic;</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QTableWidget" name="tableLog_2">
+           <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+           <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+           <property name="wordWrap"><bool>false</bool></property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QGroupBox" name="groupBox_3">
+        <property name="title">
+         <string>SVM 3</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_3">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_Status3">
+           <item><widget class="QLabel" name="labelStatus_3"><property name="text"><string>Status:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueStatus_3"><property name="font"><font><weight>75</weight><bold>true</bold></font></property><property name="styleSheet"><string notr="true">padding: 2px; background-color: lightgray; color: black;</string></property><property name="text"><string>INACTIVE</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
+           <item><widget class="QLabel" name="labelLAK_3"><property name="text"><string>LAK:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueLAK_3"><property name="text"><string>0x??</string></property></widget></item>
+           <item><widget class="QLabel" name="labelBCB_3"><property name="text"><string>BCB:</string></property></widget></item>
+           <item><widget class="QLabel" name="valueBCB_3"><property name="text"><string>0</string></property></widget></item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QLabel" name="errorDisplay_3">
+           <property name="text"><string>Status: OK</string></property>
+           <property name="styleSheet"><string notr="true">color: green; font-style: italic;</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QTableWidget" name="tableLog_3">
+           <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+           <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+           <property name="wordWrap"><bool>false</bool></property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
     </item>
-    <item row="0" column="1">
-     <widget class="QGroupBox" name="groupBox_1">
-      <property name="title">
-       <string>SVM 1</string>
+    <item> <!-- Элемент для кнопки сохранения, растягивающийся -->
+     <widget class="QPushButton" name="buttonSaveAllLogs">
+      <property name="text">
+       <string>Сохранить все логи</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout_1">
-       <item row="0" column="0">
-        <widget class="QLabel" name="labelStatusText_1">
-         <property name="text">
-          <string>Status:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QLabel" name="valueStatus_1">
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">padding: 2px; background-color: lightgray; color: black;</string>
-         </property>
-         <property name="text">
-          <string>INACTIVE</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="labelLAKText_1">
-         <property name="text">
-          <string>LAK:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QLabel" name="valueLAK_1">
-         <property name="text">
-          <string>0x??</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="labelBCBText_1">
-         <property name="text">
-          <string>BCB:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueBCB_1">
-         <property name="text">
-          <string>0</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0" colspan="2">
-        <widget class="QLabel" name="errorStatusLabel_1">
-         <property name="text">
-          <string>Errors: OK</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="2">
-        <widget class="QLabel" name="labelHistory_1">
-         <property name="text">
-          <string>Message History:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="5" column="0" colspan="2">
-        <widget class="QListWidget" name="historyList_1"/>
-       </item>
-      </layout>
-     </widget>
-    </item>
-    <item row="1" column="0">
-     <widget class="QGroupBox" name="groupBox_2">
-      <property name="title">
-       <string>SVM 2</string>
-      </property>
-      <layout class="QGridLayout" name="gridLayout_2">
-       <item row="0" column="0">
-        <widget class="QLabel" name="labelStatusText_2">
-         <property name="text">
-          <string>Status:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QLabel" name="valueStatus_2">
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">padding: 2px; background-color: lightgray; color: black;</string>
-         </property>
-         <property name="text">
-          <string>INACTIVE</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="labelLAKText_2">
-         <property name="text">
-          <string>LAK:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QLabel" name="valueLAK_2">
-         <property name="text">
-          <string>0x??</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="labelBCBText_2">
-         <property name="text">
-          <string>BCB:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueBCB_2">
-         <property name="text">
-          <string>0</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0" colspan="2">
-        <widget class="QLabel" name="errorStatusLabel_2">
-         <property name="text">
-          <string>Errors: OK</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="2">
-        <widget class="QLabel" name="labelHistory_2">
-         <property name="text">
-          <string>Message History:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="5" column="0" colspan="2">
-        <widget class="QListWidget" name="historyList_2"/>
-       </item>
-      </layout>
-     </widget>
-    </item>
-    <item row="1" column="1">
-     <widget class="QGroupBox" name="groupBox_3">
-      <property name="title">
-       <string>SVM 3</string>
-      </property>
-      <layout class="QGridLayout" name="gridLayout_3">
-       <item row="0" column="0">
-        <widget class="QLabel" name="labelStatusText_3">
-         <property name="text">
-          <string>Status:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QLabel" name="valueStatus_3">
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">padding: 2px; background-color: lightgray; color: black;</string>
-         </property>
-         <property name="text">
-          <string>INACTIVE</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="labelLAKText_3">
-         <property name="text">
-          <string>LAK:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QLabel" name="valueLAK_3">
-         <property name="text">
-          <string>0x??</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="labelBCBText_3">
-         <property name="text">
-          <string>BCB:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLabel" name="valueBCB_3">
-         <property name="text">
-          <string>0</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0" colspan="2">
-        <widget class="QLabel" name="errorStatusLabel_3">
-         <property name="text">
-          <string>Errors: OK</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="2">
-        <widget class="QLabel" name="labelHistory_3">
-         <property name="text">
-          <string>Message History:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="5" column="0" colspan="2">
-        <widget class="QListWidget" name="historyList_3"/>
-       </item>
-      </layout>
      </widget>
     </item>
    </layout>

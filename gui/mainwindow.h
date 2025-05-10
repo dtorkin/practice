@@ -3,19 +3,17 @@
 
 #include <QMainWindow>
 #include <QVector>
-#include <QMap> // Для хранения предыдущих номеров сообщений
+#include <QDateTime>
 
-#include "uvmmonitorclient.h" // Для структуры SvmStatusData
+#include "uvmmonitorclient.h" // Для сигналов
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
 class QLabel;
-class QListWidget; // Предварительное объявление
-
-// Максимальное количество элементов в истории для каждого SVM
-const int MAX_HISTORY_ITEMS = 20;
+class QTableWidget;
+class QPushButton;
 
 class MainWindow : public QMainWindow
 {
@@ -26,29 +24,34 @@ public:
     ~MainWindow();
 
 private slots:
-    void updateSvmDisplay(const SvmStatusData& data);
+    void onNewMessageOrEvent(int svmId, const QDateTime& timestamp,
+                             const QString& directionOrEventType,
+                             int msgType, const QString& msgName, int msgNum,
+                             int assignedLak, const QString& details);
+
     void updateConnectionStatus(bool connected, const QString& message);
+    void updateSvmLinkStatusDisplay(int svmId, int newStatus);
+
+    void onSaveLogAllClicked();
+
 
 private:
     Ui::MainWindow *ui;
     UvmMonitorClient *m_client;
 
-    // Массивы для быстрого доступа к виджетам по ID SVM
     QVector<QLabel*> m_statusLabels;
     QVector<QLabel*> m_lakLabels;
     QVector<QLabel*> m_bcbLabels;
-    QVector<QListWidget*> m_historyWidgets; // Для истории сообщений
-    QVector<QLabel*> m_errorLabels;      // Для отображения ошибок
+    QVector<QTableWidget*> m_logTables;
+    QVector<QLabel*> m_errorDisplays;
 
-    // Хранение предыдущих номеров сообщений для определения новых
-    // Используем QMap, чтобы не зависеть от MAX_SVM_CONFIGS и обрабатывать только существующие ID
-    QMap<int, int> m_prevSentNum; // key: svm_id, value: last_sent_msg_num
-    QMap<int, int> m_prevRecvNum; // key: svm_id, value: last_recv_msg_num
+    // Для отслеживания последних номеров BCB, чтобы не дублировать его вывод
+    QVector<quint32> m_lastDisplayedBcb;
 
 
     QString statusToString(int status);
     QString statusToStyleSheet(int status);
-    // Вспомогательная функция для получения имени типа сообщения (если есть)
-    QString messageTypeToName(int type);
+    void saveTableLogToFile(int svmId, const QString& baseDir); // Добавлен аргумент директории
+    void initTableWidget(QTableWidget* table); // Вспомогательная функция для настройки таблицы
 };
 #endif // MAINWINDOW_H

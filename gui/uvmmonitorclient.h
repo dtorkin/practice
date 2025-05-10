@@ -4,7 +4,8 @@
 #include <QObject>
 #include <QTcpSocket>
 #include <QTimer>
-#include <QString> // Для QString
+#include <QString> 
+#include <QDateTime>
 
 // Структура для хранения распарсенных данных о состоянии одного SVM
 struct SvmStatusData {
@@ -30,6 +31,12 @@ struct SvmStatusData {
 };
 
 
+struct SvmLinkOverallStatus {
+    int id = -1;
+    int statusCode = 0; // Соответствует UvmLinkStatus
+    int lak = 0;
+};
+
 class UvmMonitorClient : public QObject
 {
     Q_OBJECT
@@ -41,8 +48,20 @@ public:
     void disconnectFromServer();
 
 signals:
-    void svmStatusUpdated(const SvmStatusData& data);
+    // Сигнал для нового сообщения или события
+    void newMessageOrEvent(int svmId, const QDateTime& timestamp,
+                           const QString& directionOrEventType, // "SENT", "RECV", "EVENT"
+                           int msgType,        // Тип сообщения (если SENT/RECV)
+                           const QString& msgName,    // Имя сообщения (если SENT/RECV)
+                           int msgNum,         // Номер сообщения (если SENT/RECV)
+                           int assignedLak,    // LAK, которому адресовано (SENT) или от которого пришло (RECV)
+                           const QString& details);   // Дополнительные детали (для EVENT)
+
+    // Сигнал об изменении статуса подключения к uvm_app
     void connectionStatusChanged(bool connected, const QString& message);
+    // Сигнал для обновления общего статуса SVM (например, ACTIVE/FAILED)
+    void svmLinkStatusChanged(int svmId, int newStatus);
+
 
 private slots:
     void onConnected();
@@ -59,6 +78,7 @@ private:
     QByteArray m_buffer;
 
     void parseData(const QByteArray& data);
+    QString getMessageNameByType(int type); // Вспомогательная функция
 };
 
 #endif // UVMMONITORCLIENT_H
