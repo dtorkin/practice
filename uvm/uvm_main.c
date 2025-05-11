@@ -727,25 +727,26 @@ int main(int argc, char *argv[]) {
         LogicalAddress expected_lak = 0;      // Объявляем здесь
         UvmLinkStatus current_status = UVM_LINK_INACTIVE; // Объявляем здесь
 
-        if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data)) {
-            message_received_in_this_iteration = true;
-            int svm_id = response_msg_data.source_svm_id;
-            Message *msg = &response_msg_data.message;
-            uint16_t msg_num = get_full_message_number(&msg->header);
-            char gui_msg_buffer[512]; // Увеличил буфер на всякий случай
-            char details_for_gui[256] = ""; // Для дополнительных деталей (RSK, TKS и т.д.)
-            char bcb_field_for_gui[32] = ""; // Для BCB
-            bool bcb_was_in_message = false;
+		if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data)) {
+			message_received_in_this_iteration = true;
+			int svm_id = response_msg_data.source_svm_id;
+			Message *msg = &response_msg_data.message;
+			uint16_t msg_num = get_full_message_number(&msg->header);
+			// char gui_msg_buffer[512]; // Уже объявлена выше
+			// char details_for_gui[256] = ""; // Уже объявлена выше
+			// char bcb_field_for_gui[32] = ""; // Уже объявлена выше
+			// bool bcb_was_in_message = false; // Уже объявлена выше
 
-            LogicalAddress expected_lak = 0;
-            UvmLinkStatus current_status = UVM_LINK_INACTIVE;
+			// ОБЪЯВЛЯЕМ ЗДЕСЬ, ВНУТРИ IF
+			LogicalAddress expected_lak = 0;
+			UvmLinkStatus current_status = UVM_LINK_INACTIVE;
 
-            // --- Обновление данных в svm_links[svm_id] ---
-            pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) { // Используем MAX_SVM_CONFIGS
-                 UvmSvmLink *link = &svm_links[svm_id];
-                 expected_lak = link->assigned_lak;
-                 current_status = link->status;
+			// --- Обновление данных в svm_links[svm_id] ---
+			pthread_mutex_lock(&uvm_links_mutex);
+			if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+				 UvmSvmLink *link = &svm_links[svm_id];
+				 expected_lak = link->assigned_lak; // Используем для присвоения
+				 current_status = link->status;     // Используем для присвоения
 
                  if(current_status == UVM_LINK_ACTIVE) {
                      link->last_activity_time = time(NULL);
@@ -806,16 +807,20 @@ int main(int argc, char *argv[]) {
                                  }
                              }
                              break;
-                         case MESSAGE_TYPE_SOSTOYANIE_LINII:
-                             if(ntohs(msg->header.body_length) >= sizeof(SostoyanieLiniiBody)) {
-                                 SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg->body;
-                                 link->last_recv_bcb = ntohl(body->bcb);
-                                 link->last_recv_kla = ntohs(body->kla);
-                                 link->last_recv_sla_us100 = ntohl(body->sla);
-                                 link->last_recv_ksa = ntohs(body->ksa);
-                                 snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-                                 bcb_was_in_message = true;
-                                 snprintf(details_for_gui, sizeof(details_for_gui), "KLA=%u;SLA=%u;KSA=%u", link->last_recv_kla, link->last_recv_sla_us100, link->last_recv_ksa);
+						case MESSAGE_TYPE_SOSTOYANIE_LINII:
+							if(ntohs(msg->header.body_length) >= sizeof(SostoyanieLiniiBody)) {
+								SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg->body;
+								link->last_recv_bcb = ntohl(body->bcb); // Обновляем BCB
+								// bcb_value_for_label уже будет содержать это значение
+								snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
+								bcb_was_in_message = true;
+
+								// --- ИЗМЕНЕНИЯ ЗДЕСЬ ---
+								// Просто извлекаем значения для строки деталей, не сохраняем в link
+								uint16_t kla_host = ntohs(body->kla);
+								uint32_t sla_host = ntohl(body->sla);
+								uint16_t ksa_host = ntohs(body->ksa);
+								snprintf(details_for_gui, sizeof(details_for_gui), "KLA=%u;SLA=%u;KSA=%u", kla_host, sla_host, ksa_host);
                              }
                              break;
                          case MESSAGE_TYPE_PREDUPREZHDENIE:
@@ -850,8 +855,8 @@ int main(int argc, char *argv[]) {
                 // и Receiver еще не успел отреагировать на shutdown сокета.
             } else {
                 // Логируем получение сообщения в UVM консоль
-                printf("UVM Main: Processing message type %u from SVM ID %d (Assigned LAK 0x%02X, Num %u)\n",
-                       msg->header.message_type, svm_id, expected_lak, msg_num);
+				printf("UVM Main: Processing message type %u from SVM ID %d (Assigned LAK 0x%02X, Num %u)\n",
+					   msg->header.message_type, svm_id, expected_lak, msg_num); // Используем expected_lak
 
                 // Отправка RECV события в GUI
                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
