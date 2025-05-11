@@ -293,22 +293,32 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
 
     // Инициализация массива экземпляров и мьютексов
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-        initialize_svm_instance(&svm_instances[i], i);
-		printf("DEBUG SVM ID %d: simulate_control_failure=%d, disconnect_after=%d, simulate_timeout=%d, send_warning=%d, tks=%u\n",
-       instance->id, // или instance->id
-       config.svm_settings[instance->id].simulate_control_failure, // или instance->simulate_control_failure
-       config.svm_settings[instance->id].disconnect_after_messages,
-       config.svm_settings[instance->id].simulate_response_timeout,
-       config.svm_settings[instance->id].send_warning_on_confirm,
-       config.svm_settings[instance->id].warning_tks);
+        // initialize_svm_instance теперь использует глобальную config
+        initialize_svm_instance(&svm_instances[i], i); // 'i' передается как id
         if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
             perror("Failed to initialize instance mutex");
             for (int j = 0; j < i; ++j) pthread_mutex_destroy(&svm_instances[j].instance_mutex);
-            pthread_mutex_destroy(&svm_instances_mutex);
+            pthread_mutex_destroy(&svm_instances_mutex); // Если он уже был создан
+            destroy_svm_timer_sync(); // Если он уже был создан
+            if (svm_outgoing_queue) qmq_destroy(svm_outgoing_queue); // Если он уже был создан
             exit(EXIT_FAILURE);
         }
         listen_sockets[i] = -1;
         listener_threads[i] = 0;
+
+        // --- ОТЛАДОЧНЫЙ ВЫВОД ПАРАМЕТРОВ СБОЕВ ДЛЯ ЭКЗЕМПЛЯРА i ---
+        // Выводим значения, которые были СКОПИРОВАНЫ в svm_instances[i]
+        // внутри initialize_svm_instance
+        printf("DEBUG SVM MAIN - Instance %d Settings: LAK=0x%02X, simulate_control_failure=%d, "
+               "disconnect_after=%d, simulate_timeout=%d, send_warning=%d, tks=%u\n",
+               i, // Используем итератор цикла 'i'
+               svm_instances[i].assigned_lak,
+               svm_instances[i].simulate_control_failure,
+               svm_instances[i].disconnect_after_messages,
+               svm_instances[i].simulate_response_timeout,
+               svm_instances[i].send_warning_on_confirm,
+               svm_instances[i].warning_tks);
+        // --- КОНЕЦ ОТЛАДОЧНОГО ВЫВОДА ---
     }
 
     // Загрузка конфигурации
