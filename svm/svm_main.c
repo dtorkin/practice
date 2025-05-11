@@ -294,6 +294,13 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
     // Инициализация массива экземпляров и мьютексов
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
         initialize_svm_instance(&svm_instances[i], i);
+		printf("DEBUG SVM ID %d: simulate_control_failure=%d, disconnect_after=%d, simulate_timeout=%d, send_warning=%d, tks=%u\n",
+       id, // или instance->id
+       config.svm_settings[id].simulate_control_failure, // или instance->simulate_control_failure
+       config.svm_settings[id].disconnect_after_messages,
+       config.svm_settings[id].simulate_response_timeout,
+       config.svm_settings[id].send_warning_on_confirm,
+       config.svm_settings[id].warning_tks);
         if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
             perror("Failed to initialize instance mutex");
             for (int j = 0; j < i; ++j) pthread_mutex_destroy(&svm_instances[j].instance_mutex);
