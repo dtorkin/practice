@@ -55,6 +55,7 @@ signals:
                            const QString& msgName,    // Имя сообщения (если SENT/RECV)
                            int msgNum,         // Номер сообщения (если SENT/RECV)
                            int assignedLak,    // LAK, которому адресовано (SENT) или от которого пришло (RECV)
+						   quint32 bcb,
                            const QString& details);   // Дополнительные детали (для EVENT)
 
     // Сигнал об изменении статуса подключения к uvm_app

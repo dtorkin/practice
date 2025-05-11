@@ -130,6 +130,7 @@ void UvmMonitorClient::parseData(const QByteArray& data)
      int msgType = -1;
      QString msgName = "N/A";
      int msgNum = -1;
+	 quint32 bcbFromIPC = 0;
      int lak = -1; // LAK, пришедший в строке (может быть LAK SVM для SENT или LAK UVM для RECV)
      QString detailsStr = "";
      QDateTime timestamp = QDateTime::currentDateTime();
@@ -180,6 +181,15 @@ void UvmMonitorClient::parseData(const QByteArray& data)
              lak = -1;
          }
      }
+	 
+     if (fieldsMap.contains("BCB")) {
+         bool ok_bcb;
+         bcbFromIPC = fieldsMap.value("BCB").toUInt(&ok_bcb, 0); // Парсим как hex/dec
+         if (!ok_bcb) {
+             qWarning() << "IPC: Failed to parse BCB for SVM" << svmId << ":" << fieldsMap.value("BCB");
+             bcbFromIPC = 0; // Сброс при ошибке
+         }
+     }
      if (fieldsMap.contains("Details")) {
          detailsStr = fieldsMap.value("Details");
      }
@@ -209,7 +219,7 @@ void UvmMonitorClient::parseData(const QByteArray& data)
      // AssignedLAK будет передан через svmLinkStatusChanged.
      emit newMessageOrEvent(svmId, timestamp, eventDirectionOrType, msgType, msgName, msgNum,
                             (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") ? lak : -1,
-                            detailsStr);
+                            bcbFromIPC, detailsStr);
 
      // Отдельный сигнал для LinkStatus, если он был передан как EVENT
      if(eventDirectionOrType == "EVENT" && msgName == "LinkStatus") {

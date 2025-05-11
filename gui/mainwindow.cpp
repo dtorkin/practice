@@ -90,7 +90,7 @@ void MainWindow::initTableWidget(QTableWidget* table) {
 
 void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
-                                   int lakFromIPC, const QString &details) // lakFromIPC - это LAK, пришедший из IPC строки
+                                   int lakFromIPC, quint32 bcbFromEvent, const QString &details) // lakFromIPC - это LAK, пришедший из IPC строки
 {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
         qWarning() << "Received message/event for invalid SVM ID or uninitialized table:" << svmId;
@@ -126,18 +126,13 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
         table->setItem(row, 4, new QTableWidgetItem(msgName));
         table->setItem(row, 5, new QTableWidgetItem(QString::number(msgNum)));
 
-        // Обновляем отдельный QLabel для BCB, если детали содержат BCB
-        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && !details.isEmpty()) {
-            // Ищем "BCB=значение" в строке деталей
-            QRegExp bcbRegex("BCB=([0-9A-Fa-fXx]+)"); // Регулярное выражение для BCB (hex или dec)
-            int pos = bcbRegex.indexIn(details);
-            if (pos != -1) {
-                bool ok;
-                quint32 bcbVal = bcbRegex.cap(1).toUInt(&ok, 0); // cap(1) - значение из скобок, 0 для автоопределения hex
-                if (ok && bcbVal != m_lastDisplayedBcb[svmId]) {
-                    m_bcbLabels[svmId]->setText(QString::number(bcbVal));
-                    m_lastDisplayedBcb[svmId] = bcbVal;
-                }
+        table->setItem(row, 6, new QTableWidgetItem(details)); // Детали теперь не содержат BCB
+
+        // Обновляем отдельный QLabel для BCB
+        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && bcbFromEvent != 0) { // Проверяем, что BCB не нулевой
+            if (bcbFromEvent != m_lastDisplayedBcb[svmId]) {
+                m_bcbLabels[svmId]->setText(QString("0x%1").arg(bcbFromEvent, 8, 16, QChar('0')).toUpper());
+                m_lastDisplayedBcb[svmId] = bcbFromEvent;
             }
         }
         // Для SENT/RECV details могут содержать и другую информацию (RSK, TKS и т.д.)
