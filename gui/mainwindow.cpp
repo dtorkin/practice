@@ -88,7 +88,7 @@ void MainWindow::initTableWidget(QTableWidget* table) {
     table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк слева
 }
 
-void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime ×tamp, const QString &directionOrEventType,
+void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
                                    int lakInIPCMessage, // LAK из строки IPC (может быть LAK SVM для SENT, или LAK UVM для RECV)
                                    quint32 bcbFromEvent,  // BCB, извлеченный парсером из поля BCB:
