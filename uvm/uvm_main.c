@@ -888,46 +888,58 @@ int main(int argc, char *argv[]) {
             if (!uvm_keep_running) { break; }
         }
 
-        // --- Периодическая проверка Keep-Alive ---
+// --- Периодическая проверка Keep-Alive ---
         time_t now_keepalive = time(NULL);
-        const time_t keepalive_timeout_sec = 30;
+        const time_t keepalive_timeout_sec = 15; // <-- УМЕНЬШИЛ ДЛЯ БЫСТРОГО ТЕСТА
 
         for (int k = 0; k < num_svms_in_config; ++k) {
-             bool send_ka_event = false;
-             UvmLinkStatus ka_status_before = UVM_LINK_INACTIVE;
-             LogicalAddress ka_lak_for_event = 0;
+             bool send_ka_event_flag = false; // Используем другое имя, чтобы не конфликтовать, если send_ka_event есть выше
+             UvmLinkStatus current_link_status_for_ka = UVM_LINK_INACTIVE;
+             LogicalAddress current_ka_lak_for_event = 0;
+             bool timeout_triggered_now = false; // Флаг, что таймаут сработал именно на этой итерации
 
              pthread_mutex_lock(&uvm_links_mutex);
-             if (k >= 0 && k < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES
+             if (k >= 0 && k < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES, как определено в config.h
                 UvmSvmLink *link = &svm_links[k];
-                ka_status_before = link->status;
-                ka_lak_for_event = link->assigned_lak;
+                current_link_status_for_ka = link->status; // Сохраняем для использования после unlock
+                current_ka_lak_for_event = link->assigned_lak;
+
+                // --- ДОБАВЛЕН ОТЛАДОЧНЫЙ PRINTF ---
+                if (link->status == UVM_LINK_ACTIVE) { // Логируем только для активных, чтобы не засорять вывод
+                    long time_diff = (link->last_activity_time == 0) ? -1 : (now_keepalive - link->last_activity_time);
+                    printf("DEBUG KeepAlive Check SVM %d: Status=%d, LastActivity=%ld (Diff: %ld sec), TimeoutAfter=%ld sec\n",
+                           k, link->status, link->last_activity_time, time_diff, keepalive_timeout_sec);
+                }
+                // --- КОНЕЦ ОТЛАДОЧНОГО PRINTF ---
 
                 if (link->status == UVM_LINK_ACTIVE && link->last_activity_time != 0 &&
                     (now_keepalive - link->last_activity_time) > keepalive_timeout_sec)
                 {
-                     fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT for SVM ID %d!\n", k);
+                     fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT detected for SVM ID %d! (Last activity %ld s ago)\n",
+                             k, (now_keepalive - link->last_activity_time));
                      link->status = UVM_LINK_FAILED;
-                     link->timeout_detected = true; // Устанавливаем флаг таймаута
+                     link->timeout_detected = true; // Флаг, что таймаут был для этого линка
                      if (link->connection_handle >= 0) {
                           shutdown(link->connection_handle, SHUT_RDWR);
                      }
-                     send_ka_event = true; // Помечаем, что нужно отправить событие
+                     timeout_triggered_now = true; // Таймаут сработал именно сейчас
                 }
              }
              pthread_mutex_unlock(&uvm_links_mutex);
 
-             if(send_ka_event){
-                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity", k);
+             // Отправляем события, если таймаут сработал именно сейчас
+             if(timeout_triggered_now){
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity for %ld sec", k, keepalive_timeout_sec);
                  send_to_gui_socket(gui_msg_buffer);
-                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", k, UVM_LINK_FAILED, ka_lak_for_event);
+                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", k, UVM_LINK_FAILED, current_ka_lak_for_event);
                  send_to_gui_socket(gui_msg_buffer);
-                 // Флаг timeout_detected остается true до следующего успешного сообщения или реконнекта
+                 // Флаг link->timeout_detected остается true, чтобы GUI мог это отображать,
+                 // пока соединение не будет восстановлено (если будет реконнект) или UVM не завершится.
              }
         } // end for keep-alive check
 
         if (!message_received_in_this_iteration && uvm_keep_running) {
-            usleep(100000);
+            usleep(100000); // 100 мс
         }
     } // end while (uvm_keep_running)
 
