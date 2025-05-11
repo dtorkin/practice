@@ -60,17 +60,24 @@ void* uvm_receiver_thread_func(void* arg) {
                 fprintf(stderr, "Receiver Thread (SVM %d): Marking link as FAILED due to receive error.\n", svm_id);
             }
             should_stop_thread = true;
-        } else if (recvStatus == 1) { // Соединение закрыто удаленно
-             if(uvm_keep_running) {
-                printf("Receiver Thread (SVM %d): Connection closed by SVM. Marking link as INACTIVE.\n", svm_id);
-             }
-            should_stop_thread = true; // Помечаем как inactive, а не failed
-            // Устанавливаем статус INACTIVE вместо FAILED
-            pthread_mutex_lock(&uvm_links_mutex);
-            if (link->status == UVM_LINK_ACTIVE) link->status = UVM_LINK_INACTIVE;
-             // Не закрываем хэндл здесь, main закроет при общей очистке
-            pthread_mutex_unlock(&uvm_links_mutex);
-            break; // Выходим штатно
+		} else if (recvStatus == 1) { // Соединение закрыто удаленно
+			 if(uvm_keep_running) {
+				printf("Receiver Thread (SVM %d): Connection closed by SVM. Marking link as INACTIVE.\n", svm_id);
+			 }
+			should_stop_thread = true;
+			// --- УСТАНОВКА СТАТУСА И ОТПРАВКА СОБЫТИЯ В GUI ---
+			pthread_mutex_lock(&uvm_links_mutex);
+			if (link->status == UVM_LINK_ACTIVE) { // Проверяем, чтобы не изменить FAILED на INACTIVE
+				link->status = UVM_LINK_INACTIVE; // <-- Статус обновляется
+				// Формируем и отправляем событие для GUI
+				char gui_event_buffer[128];
+				snprintf(gui_event_buffer, sizeof(gui_event_buffer),
+						 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+						 svm_id, UVM_LINK_INACTIVE, link->assigned_lak);
+				send_to_gui_socket(gui_event_buffer); // <-- Отправляем событие
+			}
+			pthread_mutex_unlock(&uvm_links_mutex);
+			break; // Выходим штатно
         } else if (recvStatus == -2) { // Таймаут/EINTR
              if (!uvm_keep_running) { // Прервано из-за сигнала завершения
                   should_stop_thread = true;
