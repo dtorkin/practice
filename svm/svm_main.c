@@ -74,8 +74,9 @@ void handle_shutdown_signal(int sig) {
 }
 
 // --- Функция инициализации экземпляра ---
-void initialize_svm_instance(SvmInstance *instance, int id) {
-    if (!instance) return;
+// Убираем зависимость от глобальной config здесь, будем передавать данные при вызове
+void initialize_svm_instance(SvmInstance *instance, int id, LogicalAddress lak_from_config, const SvmInstanceSettings* settings_from_config) {
+    if (!instance || !settings_from_config) return; // Добавлена проверка
     memset(instance, 0, sizeof(SvmInstance));
     instance->id = id;
     instance->client_handle = -1;
@@ -84,35 +85,23 @@ void initialize_svm_instance(SvmInstance *instance, int id) {
     instance->receiver_tid = 0;
     instance->processor_tid = 0;
     instance->current_state = STATE_NOT_INITIALIZED;
-    instance->message_counter = 0; // Счетчик сообщений экземпляра
-    instance->messages_sent_count = 0; // Счетчик для disconnect
+    instance->message_counter = 0;
+    instance->messages_sent_count = 0;
 
-    // Сброс счетчиков таймера
     instance->bcb_counter = 0;
     instance->link_up_changes_counter = 0;
     instance->link_up_low_time_us100 = 0;
     instance->sign_det_changes_counter = 0;
     instance->link_status_timer_counter = 0;
 
-    // Копируем параметры имитации сбоев из глобальной config
-    // (предполагается, что config уже загружена)
-    if (id >= 0 && id < MAX_SVM_INSTANCES) {
-         instance->assigned_lak = config.svm_settings[id].lak; // LAK устанавливается здесь
-         instance->simulate_control_failure = config.svm_settings[id].simulate_control_failure;
-         instance->disconnect_after_messages = config.svm_settings[id].disconnect_after_messages;
-         instance->simulate_response_timeout = config.svm_settings[id].simulate_response_timeout;
-         instance->send_warning_on_confirm = config.svm_settings[id].send_warning_on_confirm;
-         instance->warning_tks = config.svm_settings[id].warning_tks;
-    } else {
-         // Установить дефолты, если ID некорректен (хотя это не должно произойти)
-         instance->assigned_lak = 0;
-         instance->simulate_control_failure = false;
-         instance->disconnect_after_messages = -1;
-         instance->simulate_response_timeout = false;
-         instance->send_warning_on_confirm = false;
-         instance->warning_tks = 0;
-    }
-     // Мьютекс инициализируется в main
+    // Копируем параметры из переданных аргументов
+    instance->assigned_lak = lak_from_config;
+    instance->simulate_control_failure = settings_from_config->simulate_control_failure;
+    instance->disconnect_after_messages = settings_from_config->disconnect_after_messages;
+    instance->simulate_response_timeout = settings_from_config->simulate_response_timeout;
+    instance->send_warning_on_confirm = settings_from_config->send_warning_on_confirm;
+    instance->warning_tks = settings_from_config->warning_tks;
+    // Мьютекс экземпляра инициализируется в main
 }
 
 // --- Поток-слушатель для одного порта/экземпляра ---
@@ -286,15 +275,30 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
 
     printf("SVM Multi-Port Server starting...\n");
 
-    // Инициализация мьютексов
-    if (pthread_mutex_init(&svm_instances_mutex, NULL) != 0) { /*...*/ exit(EXIT_FAILURE); }
-    if (init_svm_timer_sync() != 0) { /*...*/ exit(EXIT_FAILURE); }
+    if (pthread_mutex_init(&svm_instances_mutex, NULL) != 0) { exit(EXIT_FAILURE); }
+    if (init_svm_timer_sync() != 0) { exit(EXIT_FAILURE); }
     init_message_handlers();
 
-    // Инициализация массива экземпляров и мьютексов
+    // 1. ЗАГРУЗИТЬ КОНФИГУРАЦИЮ СНАЧАЛА
+    printf("SVM: Loading configuration...\n");
+    if (load_config("config.ini", &config) != 0) { // config теперь глобальная
+        // goto cleanup_sync; // Нельзя использовать goto до объявления меток
+        destroy_svm_timer_sync();
+        pthread_mutex_destroy(&svm_instances_mutex);
+        exit(EXIT_FAILURE);
+    }
+    num_svms_to_run = config.num_svm_configs_found;
+    if (num_svms_to_run == 0) { /* ... выход ... */ }
+    printf("SVM: Will attempt to start %d instances based on config.\n", num_svms_to_run);
+
+
+    // 2. ИНИЦИАЛИЗИРОВАТЬ ЭКЗЕМПЛЯРЫ ПОСЛЕ ЗАГРУЗКИ КОНФИГА
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {
-        // initialize_svm_instance теперь использует глобальную config
-        initialize_svm_instance(&svm_instances[i], i); // 'i' передается как id
+        // Передаем конкретные настройки для этого ID
+        initialize_svm_instance(&svm_instances[i], i,
+                                config.svm_settings[i].lak,        // LAK из прочитанного конфига
+                                &config.svm_settings[i]);          // Указатель на настройки сбоев
+        
         if (pthread_mutex_init(&svm_instances[i].instance_mutex, NULL) != 0) {
             perror("Failed to initialize instance mutex");
             for (int j = 0; j < i; ++j) pthread_mutex_destroy(&svm_instances[j].instance_mutex);
@@ -307,18 +311,15 @@ int main(int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
         listener_threads[i] = 0;
 
         // --- ОТЛАДОЧНЫЙ ВЫВОД ПАРАМЕТРОВ СБОЕВ ДЛЯ ЭКЗЕМПЛЯРА i ---
-        // Выводим значения, которые были СКОПИРОВАНЫ в svm_instances[i]
-        // внутри initialize_svm_instance
         printf("DEBUG SVM MAIN - Instance %d Settings: LAK=0x%02X, simulate_control_failure=%d, "
                "disconnect_after=%d, simulate_timeout=%d, send_warning=%d, tks=%u\n",
-               i, // Используем итератор цикла 'i'
-               svm_instances[i].assigned_lak,
+               i,
+               svm_instances[i].assigned_lak, // Теперь берем из instance, а не из config
                svm_instances[i].simulate_control_failure,
                svm_instances[i].disconnect_after_messages,
                svm_instances[i].simulate_response_timeout,
                svm_instances[i].send_warning_on_confirm,
                svm_instances[i].warning_tks);
-        // --- КОНЕЦ ОТЛАДОЧНОГО ВЫВОДА ---
     }
 
     // Загрузка конфигурации
