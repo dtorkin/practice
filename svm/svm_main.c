@@ -96,6 +96,7 @@ void initialize_svm_instance(SvmInstance *instance, int id, LogicalAddress lak_f
 
     // Копируем параметры из переданных аргументов
     instance->assigned_lak = lak_from_config;
+	instance->user_flag1 = false;
     instance->simulate_control_failure = settings_from_config->simulate_control_failure;
     instance->disconnect_after_messages = settings_from_config->disconnect_after_messages;
     instance->simulate_response_timeout = settings_from_config->simulate_response_timeout;

@@ -74,15 +74,22 @@ Message* handle_provesti_kontrol_message(SvmInstance *instance, Message *receive
     instance->current_state = STATE_SELF_TEST;
     pthread_mutex_unlock(&instance->instance_mutex);
     printf("  SVM (Inst %d): Эмуляция самопроверки...\n", instance->id);
-    sleep(1);
+    sleep(1); // Обычная задержка на самопроверку
     pthread_mutex_lock(&instance->instance_mutex);
     instance->current_state = STATE_INITIALIZED;
     pthread_mutex_unlock(&instance->instance_mutex);
 
-    // --- Проверка на имитацию таймаута ---
+    // --- Проверка на имитацию таймаута (задержка или полное прекращение ответа) ---
     if (instance->simulate_response_timeout) {
-         printf("  SVM (Inst %d, LAK 0x%02X): SIMULATING response delay...\n", instance->id, instance->assigned_lak);
-         sleep(10); // Задержка 10 секунд
+        // Для SVM, который должен имитировать "зависание",
+        // мы здесь устанавливаем флаг, чтобы он перестал отвечать НА СЛЕДУЮЩИЕ команды.
+        // А на эту команду он ответит, но с задержкой.
+        printf("  SVM (Inst %d, LAK 0x%02X): SIMULATING response delay for 'Podtverzhdenie Kontrolya' AND preparing to stop responding.\n",
+               instance->id, instance->assigned_lak);
+        pthread_mutex_lock(&instance->instance_mutex);
+        instance->user_flag1 = true; // Устанавливаем флаг "перестать отвечать"
+        pthread_mutex_unlock(&instance->instance_mutex);
+        sleep(10); // Имитируем задержку ответа на ЭТУ команду
     }
     // --- Конец проверки ---
 
@@ -90,7 +97,10 @@ Message* handle_provesti_kontrol_message(SvmInstance *instance, Message *receive
     uint32_t current_bcb = get_instance_bcb_counter(instance);
 
     Message *responseMessage = (Message*)malloc(sizeof(Message));
-    if (!responseMessage) { /*...*/ return NULL; }
+    if (!responseMessage) {
+        perror("handle_provesti_kontrol_message: malloc failed");
+        return NULL;
+    }
     *responseMessage = create_podtverzhdenie_kontrolya_message(
                                 instance->assigned_lak, req_body->tk, current_bcb,
                                 instance->message_counter++);
@@ -100,29 +110,43 @@ Message* handle_provesti_kontrol_message(SvmInstance *instance, Message *receive
 
 Message* handle_vydat_rezultaty_kontrolya_message(SvmInstance *instance, Message *receivedMessage) {
     if (!instance || !receivedMessage) return NULL;
+
+    // --- Проверка, не должен ли этот экземпляр перестать отвечать ---
+    pthread_mutex_lock(&instance->instance_mutex);
+    bool should_not_respond = (instance->simulate_response_timeout && instance->user_flag1);
+    pthread_mutex_unlock(&instance->instance_mutex);
+
+    if (should_not_respond) {
+        printf("Processor (Inst %d, LAK 0x%02X): SIMULATING NO RESPONSE for 'Vydat Rezultaty Kontrolya' due to timeout simulation.\n",
+               instance->id, instance->assigned_lak);
+        return NULL; // Не отправляем ответ
+    }
+    // --- Конец проверки ---
+
     printf("Processor (Inst %d): Обработка 'Выдать результаты контроля'\n", instance->id);
     (void)receivedMessage;
 
-    // --- Проверка на имитацию сбоя ---
+    // --- Проверка на имитацию сбоя контроля ---
     uint8_t rsk = 0x3F; // По умолчанию ОК
-    if (instance->simulate_control_failure) { // Используем флаг экземпляра
-         rsk = 0x3E; // Пример ошибки
+    if (instance->simulate_control_failure) {
+         rsk = 0x3E;
          printf("  SVM (Inst %d, LAK 0x%02X): SIMULATING control failure (RSK=0x%02X).\n", instance->id, instance->assigned_lak, rsk);
     }
     // --- Конец проверки ---
 
-     // --- Проверка на имитацию таймаута ---
-     if (instance->simulate_response_timeout) {
-         printf("  SVM (Inst %d, LAK 0x%02X): SIMULATING response delay...\n", instance->id, instance->assigned_lak);
-         sleep(10); // Задержка 10 секунд
-     }
-     // --- Конец проверки ---
+    // Задержка для simulate_response_timeout здесь не нужна, так как мы либо уже вышли (should_not_respond),
+    // либо этот экземпляр не должен имитировать таймаут для этой команды.
+    // Если нужно имитировать задержку на *каждый* ответ, то блок if(instance->simulate_response_timeout) { sleep(10); }
+    // нужно ставить в начале каждой функции-обработчика с ответом.
 
     uint16_t vsk = 150;
     uint32_t current_bcb = get_instance_bcb_counter(instance);
 
     Message *responseMessage = (Message*)malloc(sizeof(Message));
-    if (!responseMessage) { /*...*/ return NULL; }
+    if (!responseMessage) {
+        perror("handle_vydat_rezultaty_kontrolya_message: malloc failed");
+        return NULL;
+    }
     *responseMessage = create_rezultaty_kontrolya_message(
                                 instance->assigned_lak, rsk, vsk, current_bcb,
                                 instance->message_counter++);
@@ -130,17 +154,25 @@ Message* handle_vydat_rezultaty_kontrolya_message(SvmInstance *instance, Message
     return responseMessage;
 }
 
- Message* handle_vydat_sostoyanie_linii_message(SvmInstance *instance, Message *receivedMessage) {
+Message* handle_vydat_sostoyanie_linii_message(SvmInstance *instance, Message *receivedMessage) {
     if (!instance || !receivedMessage) return NULL;
-     printf("Processor (Inst %d): Обработка 'Выдать состояние линии'\n", instance->id);
+
+    // --- Проверка, не должен ли этот экземпляр перестать отвечать ---
+    pthread_mutex_lock(&instance->instance_mutex);
+    bool should_not_respond = (instance->simulate_response_timeout && instance->user_flag1);
+    pthread_mutex_unlock(&instance->instance_mutex);
+
+    if (should_not_respond) {
+        printf("Processor (Inst %d, LAK 0x%02X): SIMULATING NO RESPONSE for 'Vydat Sostoyanie Linii' due to timeout simulation.\n",
+               instance->id, instance->assigned_lak);
+        return NULL; // Не отправляем ответ
+    }
+    // --- Конец проверки ---
+
+    printf("Processor (Inst %d): Обработка 'Выдать состояние линии'\n", instance->id);
     (void)receivedMessage;
 
-     // --- Проверка на имитацию таймаута ---
-     if (instance->simulate_response_timeout) {
-         printf("  SVM (Inst %d, LAK 0x%02X): SIMULATING response delay...\n", instance->id, instance->assigned_lak);
-         sleep(10); // Задержка 10 секунд
-     }
-     // --- Конец проверки ---
+    // Задержка для simulate_response_timeout здесь не нужна по тем же причинам.
 
     uint16_t kla_val;
     uint32_t sla_val_us100;
@@ -149,13 +181,17 @@ Message* handle_vydat_rezultaty_kontrolya_message(SvmInstance *instance, Message
     get_instance_line_status_counters(instance, &kla_val, &sla_val_us100, &ksa_val);
 
     Message *responseMessage = (Message*)malloc(sizeof(Message));
-    if (!responseMessage) { /*...*/ return NULL; }
+    if (!responseMessage) {
+        perror("handle_vydat_sostoyanie_linii_message: malloc failed");
+        return NULL;
+    }
     *responseMessage = create_sostoyanie_linii_message(
                                 instance->assigned_lak, kla_val, sla_val_us100, ksa_val, current_bcb,
                                 instance->message_counter++);
     printf("  Ответ 'Состояние линии' сформирован.\n");
     return responseMessage;
 }
+
 
 // --- Заглушки и обработчики без ответа ---
 // (Используют instance->id для логов)

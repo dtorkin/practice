@@ -46,6 +46,7 @@ typedef struct SvmInstance {
     pthread_mutex_t instance_mutex;
 
     // --- ПОЛЯ ДЛЯ ИМИТАЦИИ СБОЕВ ---
+	bool user_flag1; // Для кастомной логики сбоев (например, прекратить отвечать)
     bool simulate_control_failure;
     int disconnect_after_messages; // -1 = off
     int messages_sent_count;      // Счетчик отправленных для disconnect_after
