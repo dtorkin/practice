@@ -88,9 +88,11 @@ void MainWindow::initTableWidget(QTableWidget* table) {
     table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк слева
 }
 
-void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
+void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime ×tamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
-                                   int lakFromIPC, quint32 bcbFromEvent, const QString &details) // lakFromIPC - это LAK, пришедший из IPC строки
+                                   int lakInIPCMessage, // LAK из строки IPC (может быть LAK SVM для SENT, или LAK UVM для RECV)
+                                   quint32 bcbFromEvent,  // BCB, извлеченный парсером из поля BCB:
+                                   const QString &details) // Остальные детали (например, RSK, TKS)
 {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
         qWarning() << "Received message/event for invalid SVM ID or uninitialized table:" << svmId;
@@ -101,81 +103,72 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
     int row = table->rowCount();
     table->insertRow(row);
 
+    // 1. Время
     table->setItem(row, 0, new QTableWidgetItem(timestamp.toString("hh:mm:ss.zzz")));
+
+    // 2. Направление/Событие
     table->setItem(row, 1, new QTableWidgetItem(directionOrEventType));
 
-    // --- ИЗМЕНЕНИЕ: Отображаем "родной" LAK SVM ---
+    // 3. LAK SVM (используем сохраненный "родной" LAK экземпляра)
     int displayLak = -1;
     if (svmId >= 0 && svmId < m_assignedLaks.size() && m_assignedLaks[svmId] >= 0) {
-        displayLak = m_assignedLaks[svmId]; // Используем сохраненный "родной" LAK
+        displayLak = m_assignedLaks[svmId];
     } else if (directionOrEventType == "SENT") {
-        displayLak = lakFromIPC; // Для SENT это и есть LAK SVM
-    } else {
-        // Для RECV или EVENT без сохраненного LAK, можно показать LAK из IPC (который будет UVM для RECV)
-        // или оставить N/A, или показать LAK из деталей, если он там есть
-        displayLak = lakFromIPC; // Оставляем LAK из IPC, если "родной" еще не известен
+        // Если "родной" LAK еще не известен, но это SENT, то lakInIPCMessage - это LAK SVM
+        displayLak = lakInIPCMessage;
     }
+    // Если это RECV и "родной" LAK не известен, то lakInIPCMessage будет адресом UVM (0x01),
+    // что тоже можно отобразить или оставить N/A. Пока оставляем так.
     table->setItem(row, 2, new QTableWidgetItem((displayLak >=0) ? QString("0x%1").arg(displayLak, 2, 16, QChar('0')).toUpper() : "N/A"));
-    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
-
-    QString detailsToShow = details;
-
+    // 4, 5, 6, 7: Тип, Имя, Номер, Детали
     if (directionOrEventType == "SENT" || directionOrEventType == "RECV") {
         table->setItem(row, 3, new QTableWidgetItem(QString::number(msgType)));
         table->setItem(row, 4, new QTableWidgetItem(msgName));
         table->setItem(row, 5, new QTableWidgetItem(QString::number(msgNum)));
-
-        table->setItem(row, 6, new QTableWidgetItem(details)); // Детали теперь не содержат BCB
+        table->setItem(row, 6, new QTableWidgetItem(details)); // Детали (RSK, TKS и т.д., БЕЗ BCB, если он передан отдельно)
 
         // Обновляем отдельный QLabel для BCB
-        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && bcbFromEvent != 0) { // Проверяем, что BCB не нулевой
+        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && bcbFromEvent != 0) { // Используем bcbFromEvent
             if (bcbFromEvent != m_lastDisplayedBcb[svmId]) {
                 m_bcbLabels[svmId]->setText(QString("0x%1").arg(bcbFromEvent, 8, 16, QChar('0')).toUpper());
                 m_lastDisplayedBcb[svmId] = bcbFromEvent;
             }
         }
-        // Для SENT/RECV details могут содержать и другую информацию (RSK, TKS и т.д.)
-        detailsToShow = details; // Отображаем все детали
     } else { // EVENT
-        table->setItem(row, 3, new QTableWidgetItem("-"));
-        table->setItem(row, 4, new QTableWidgetItem(msgName)); // msgName здесь - это тип события
-        table->setItem(row, 5, new QTableWidgetItem("-"));
-        detailsToShow = details; // Для EVENT детали всегда отображаем
-    }
-    table->setItem(row, 6, new QTableWidgetItem(detailsToShow));
-
-
-    // Обновляем основной LAK QLabel, если он еще не установлен или изменился (из LinkStatus)
-    // Это делается в updateSvmLinkStatusDisplay, здесь дублировать не обязательно,
-    // но можно оставить для случая, если первое сообщение - не LinkStatus.
-    if (m_lakLabels.size() > svmId && m_lakLabels[svmId] && displayLak >=0) {
-         if (m_lakLabels[svmId]->text() == "N/A" || m_lakLabels[svmId]->text() != QString("0x%1").arg(displayLak, 2, 16, QChar('0')).toUpper()) {
-            if (m_assignedLaks[svmId] == displayLak) { // Обновляем, только если LAK совпадает с назначенным
-                m_lakLabels[svmId]->setText(QString("0x%1").arg(displayLak, 2, 16, QChar('0')).toUpper());
-            }
-         }
+        table->setItem(row, 3, new QTableWidgetItem("-")); // Тип сообщения
+        table->setItem(row, 4, new QTableWidgetItem(msgName)); // msgName здесь - это тип события из IPC
+        table->setItem(row, 5, new QTableWidgetItem("-")); // Номер сообщения
+        table->setItem(row, 6, new QTableWidgetItem(details));
     }
 
+    // Обновляем основной LAK QLabel (это делает updateSvmLinkStatusDisplay, когда LAK становится известен)
+    // Здесь можно было бы сделать, если LAK обновился из SENT, но лучше централизовать в updateSvmLinkStatusDisplay
 
-    // Обновляем поле ошибки/последнего события
+    // Обновляем errorDisplay
     if (m_errorDisplays.size() > svmId && m_errorDisplays[svmId]) {
         if (directionOrEventType == "EVENT") {
-            QString eventText = QString("%1: %2").arg(msgName).arg(details);
+            QString eventText = QString("%1: %2").arg(msgName).arg(details); // msgName здесь = тип события
             m_errorDisplays[svmId]->setText(eventText);
-            if (msgName.contains("Fail", Qt::CaseInsensitive) || msgName.contains("Error", Qt::CaseInsensitive) || msgName.contains("Timeout", Qt::CaseInsensitive) || msgName.contains("Mismatch", Qt::CaseInsensitive)) {
+
+            if (msgName.contains("Fail", Qt::CaseInsensitive) ||
+                msgName.contains("Error", Qt::CaseInsensitive) ||
+                msgName.contains("Timeout", Qt::CaseInsensitive) ||
+                msgName.contains("Mismatch", Qt::CaseInsensitive)) {
                 m_errorDisplays[svmId]->setStyleSheet("background-color: lightcoral; color: white; font-style: italic; padding: 2px;");
             } else if (msgName.contains("Warning", Qt::CaseInsensitive)) {
                 m_errorDisplays[svmId]->setStyleSheet("background-color: #FFFACD; color: black; font-style: italic; padding: 2px;"); // LemonChiffon
-            } else if (msgName == "LinkStatus" && details.contains("ACTIVE")) {
+            } else if (msgName == "LinkStatus" && details.contains("NewStatus=2")) { // 2 = ACTIVE
+                 // Сбрасываем на ОК, только если это событие LinkStatus=ACTIVE
                  m_errorDisplays[svmId]->setText("Status: OK");
                  m_errorDisplays[svmId]->setStyleSheet("color: green; font-style: normal;");
             } else { // Другие информационные события
                  m_errorDisplays[svmId]->setStyleSheet("color: blue; font-style: italic;");
             }
         }
-        // Не сбрасываем errorDisplay при обычных SENT/RECV, чтобы последняя ошибка/важное событие было видно,
-        // пока не придет новое событие LinkStatus=ACTIVE или другое информационное событие.
+        // При обычных SENT/RECV сообщениях, errorDisplay НЕ сбрасывается на "OK",
+        // чтобы последнее важное событие/ошибка оставалось видимым.
+        // Сброс на "OK" происходит только при получении события "LinkStatus" с активным статусом.
     }
 
     table->scrollToBottom();

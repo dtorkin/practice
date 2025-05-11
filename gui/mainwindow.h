@@ -34,7 +34,8 @@ private slots:
     void onNewMessageOrEvent(int svmId, const QDateTime& timestamp,
                              const QString& directionOrEventType,
                              int msgType, const QString& msgName, int msgNum,
-                             int assignedLak, const QString& details);
+                             int assignedLak, quint32 bcb, const QString& details); // <-- ДОБАВЛЕН quint32 bcb
+
 
     void updateConnectionStatus(bool connected, const QString& message);
     void updateSvmLinkStatusDisplay(int svmId, int newStatus, int assignedLak);

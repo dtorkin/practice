@@ -217,9 +217,10 @@ void UvmMonitorClient::parseData(const QByteArray& data)
 
      // Для SENT/RECV передаем lak из строки. Для EVENT, lak нерелевантен в этом сигнале.
      // AssignedLAK будет передан через svmLinkStatusChanged.
-     emit newMessageOrEvent(svmId, timestamp, eventDirectionOrType, msgType, msgName, msgNum,
-                            (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") ? lak : -1,
-                            bcbFromIPC, detailsStr);
+    emit newMessageOrEvent(svmId, timestamp, eventDirectionOrType, msgType, msgName, msgNum,
+                           lak, // LAK из строки IPC
+                           (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") ? bcbFromIPC : 0, // Передаем BCB для SENT/RECV, 0 для EVENT
+                           detailsStr);
 
      // Отдельный сигнал для LinkStatus, если он был передан как EVENT
      if(eventDirectionOrType == "EVENT" && msgName == "LinkStatus") {
