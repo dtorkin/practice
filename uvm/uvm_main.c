@@ -743,7 +743,7 @@ int main(int argc, char *argv[]) {
 
 			// --- Обновление данных в svm_links[svm_id] ---
 			pthread_mutex_lock(&uvm_links_mutex);
-			if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+			if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
 				 UvmSvmLink *link = &svm_links[svm_id];
 				 expected_lak = link->assigned_lak; // Используем для присвоения
 				 current_status = link->status;     // Используем для присвоения
@@ -870,7 +870,7 @@ int main(int argc, char *argv[]) {
                 // Эти события формируются на основе данных, которые УЖЕ были извлечены и сохранены
                 if (msg->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
                     pthread_mutex_lock(&uvm_links_mutex); // Блокируем для чтения и возможной модификации
-                    if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                    if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                         if (svm_links[svm_id].lak_mismatch_detected) { // Если флаг был установлен выше
                              snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
                                       "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X",
@@ -885,7 +885,7 @@ int main(int argc, char *argv[]) {
                     pthread_mutex_unlock(&uvm_links_mutex);
                 } else if (msg->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
                     pthread_mutex_lock(&uvm_links_mutex);
-                    if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                    if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                         if (svm_links[svm_id].control_failure_detected) { // Если флаг был установлен
                              snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
                                       "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X",
@@ -900,7 +900,7 @@ int main(int argc, char *argv[]) {
                     pthread_mutex_unlock(&uvm_links_mutex);
                 } else if (msg->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE) {
                     pthread_mutex_lock(&uvm_links_mutex);
-                     if (svm_id >= 0 && svm_id < MAX_SVM_CONFIGS) {
+                     if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
                                   "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u",
                                   svm_id, svm_links[svm_id].last_warning_tks);
@@ -962,7 +962,7 @@ int main(int argc, char *argv[]) {
                  snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", ka_svm_id, UVM_LINK_FAILED, ka_lak);
                  send_to_gui_socket(gui_msg_buffer);
                  pthread_mutex_lock(&uvm_links_mutex); // Блокируем снова для сброса флага (чтобы не слать повторно)
-                 if (ka_svm_id >= 0 && ka_svm_id < MAX_SVM_CONFIGS) svm_links[ka_svm_id].timeout_detected = false; // Сбрасываем флаг
+                 if (ka_svm_id >= 0 && ka_svm_id < MAX_SVM_INSTANCES) svm_links[ka_svm_id].timeout_detected = false; // Сбрасываем флаг
                  pthread_mutex_unlock(&uvm_links_mutex);
              }
         } // end for keep-alive check
