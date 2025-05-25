@@ -10,6 +10,7 @@
 #include <unistd.h>  // Для usleep
 #include <time.h>    // Для clock_gettime, timersub
 #include <stdio.h>     // Для NULL
+#include <string.h>
 
 extern ThreadSafeUvmRespQueue *uvm_incoming_response_queue;
 extern volatile bool uvm_keep_running;
