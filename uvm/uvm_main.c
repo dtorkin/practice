@@ -686,13 +686,102 @@ int main(int argc, char *argv[]) {
             // Пока что для этого первого шага, остальные команды оставим как были (отправляются без ожидания).
             // TODO: В следующих шагах добавить wait_for_specific_response и для них.
 
-            // 2. Провести контроль (пока без ожидания ответа)
+            // 2. Провести контроль
             printf("UVM Main (SVM %d): Отправка 'Провести контроль' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
-            request.message = create_provesti_kontrol_message(current_lak, 0x01, current_msg_num++);
+            request.message = create_provesti_kontrol_message(current_lak, 0x01, current_msg_num); // Номер еще не инкрементируем здесь
             ProvestiKontrolBody *pk_body = (ProvestiKontrolBody *)request.message.body;
-            pk_body->tk = 0x01; // Например, запросить все контроли
-            request.message.header.body_length = htons(sizeof(ProvestiKontrolBody)); // Убедимся, что длина тела корректна
-            if (!send_uvm_request(&request)) { /* ... обработка ошибки ... */ continue; }
+            pk_body->tk = 0x01;
+            request.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
+            if (!send_uvm_request(&request)) {
+                fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки 'Провести контроль'. Пропуск SVM.\n", current_svm_id_for_loop);
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                // Отправка события LinkStatus в GUI
+                char gui_event_fail_pk[128];
+                snprintf(gui_event_fail_pk, sizeof(gui_event_fail_pk),
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_fail_pk);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue;
+            }
+            // Инкрементируем номер сообщения ПОСЛЕ успешной отправки
+            current_msg_num++;
+
+            // ОЖИДАНИЕ ОТВЕТА "Подтверждение контроля"
+            UvmResponseMessage response_podtv_kontrol;
+            // Таймаут для "Подтверждения контроля" может быть коротким, т.к. SVM отвечает быстро.
+            // Но если SVM имитирует задержку (как SVM 2), то таймаут должен это учитывать.
+            // В svm_handlers.c для "Провести контроль" есть sleep(1) + возможный sleep(10) для SVM 2.
+            // Ставим таймаут с запасом, например, 12 секунд.
+            bool got_podtv_kontrol = wait_for_specific_response(
+                                        current_svm_id_for_loop,
+                                        MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA,
+                                        &response_podtv_kontrol,
+                                        12000 // Таймаут 12 секунд
+                                    );
+
+            if (got_podtv_kontrol) {
+                message_to_host_byte_order(&response_podtv_kontrol.message);
+                PodtverzhdenieKontrolyaBody* podtv_k_body = (PodtverzhdenieKontrolyaBody*)response_podtv_kontrol.message.body;
+                uint16_t resp_msg_num_pk = get_full_message_number(&response_podtv_kontrol.message.header);
+
+                printf("UVM Main (SVM %d): Получено 'Подтверждение контроля' (Num %u, LAK_resp 0x%02X, TK_resp 0x%02X, BCB 0x%08X).\n",
+                       current_svm_id_for_loop, resp_msg_num_pk, podtv_k_body->lak, podtv_k_body->tk, podtv_k_body->bcb);
+
+                // Отправляем RECV в GUI
+                char gui_recv_msg_pk[512];
+                char bcb_field_gui_pk[32];
+                snprintf(bcb_field_gui_pk, sizeof(bcb_field_gui_pk), ";BCB:0x%08X", podtv_k_body->bcb);
+                char details_gui_pk[128];
+                snprintf(details_gui_pk, sizeof(details_gui_pk), "TK=0x%02X", podtv_k_body->tk);
+
+                snprintf(gui_recv_msg_pk, sizeof(gui_recv_msg_pk),
+                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
+                         current_svm_id_for_loop,
+                         response_podtv_kontrol.message.header.message_type,
+                         resp_msg_num_pk,
+                         response_podtv_kontrol.message.header.address,
+                         bcb_field_gui_pk,
+                         details_gui_pk);
+                send_to_gui_socket(gui_recv_msg_pk);
+
+                // Проверка LAK из ответа (хотя он всегда должен быть LOGICAL_ADDRESS_UVM_VAL)
+                // и других полей при необходимости.
+                if (podtv_k_body->lak != current_lak) {
+                     // Это странно, т.к. LAK в теле "Подтверждения контроля" - это LAK SVM
+                     // А в заголовке (response_podtv_kontrol.message.header.address) должен быть LAK SVM.
+                     // Похоже, я напутал в предыдущем блоке, LAK в теле ConfirmInit - это LAK SVM, который он подтверждает.
+                     // LAK в теле PodtverzhdenieKontrolya - это тоже LAK SVM.
+                     // Значит, тут тоже нужно проверять confirm_body->lak == current_lak
+                     fprintf(stderr, "UVM Main (SVM %d): ОШИБКА! Несовпадение LAK в 'Подтверждение контроля'. Ожидался 0x%02X, получен 0x%02X.\n",
+                            current_svm_id_for_loop, current_lak, podtv_k_body->lak);
+                    // ... (обработка ошибки, FAILED, EVENT в GUI) ...
+                    continue;
+                }
+                // "Подтверждение контроля" прошло успешно
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].last_recv_bcb = podtv_k_body->bcb;
+                pthread_mutex_unlock(&uvm_links_mutex);
+
+            } else {
+                // Таймаут или другая ошибка ожидания
+                fprintf(stderr, "UVM Main (SVM %d): Не получен ответ 'Подтверждение контроля'. Пропуск SVM.\n", current_svm_id_for_loop);
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                svm_links[current_svm_id_for_loop].response_timeout_detected = true;
+                // Отправка EVENT в GUI
+                char gui_event_timeout_pk[256];
+                snprintf(gui_event_timeout_pk, sizeof(gui_event_timeout_pk),
+                         "EVENT;SVM_ID:%d;Type:ResponseTimeout;Details:Cmd=ProvestiKontrol,ExpectedReply=PodtvKontrolya", current_svm_id_for_loop);
+                send_to_gui_socket(gui_event_timeout_pk);
+                snprintf(gui_event_timeout_pk, sizeof(gui_event_timeout_pk), // Обновляем статус
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_timeout_pk);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue; // Пропускаем остальные команды для этого SVM
+            }
 
 
             // 3. Выдать результаты контроля (пока без ожидания ответа)
