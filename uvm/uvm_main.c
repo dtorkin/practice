@@ -930,16 +930,126 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            // 4. Выдать состояние линии (пока без ожидания ответа)
+            // 4. Выдать состояние линии
             printf("UVM Main (SVM %d): Отправка 'Выдать состояние линии' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
-            request.message = create_vydat_sostoyanie_linii_message(current_lak, current_msg_num++);
-             if (!send_uvm_request(&request)) { /* ... обработка ошибки ... */ continue; }
+            request.message = create_vydat_sostoyanie_linii_message(current_lak, current_msg_num); // Номер пока не инкрементируем
+            if (!send_uvm_request(&request)) {
+                fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки 'Выдать состояние линии'. Пропуск SVM.\n", current_svm_id_for_loop);
+                // ... (логика обработки ошибки отправки, FAILED, EVENT в GUI, continue) ...
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                char gui_event_fail_vsl[128];
+                snprintf(gui_event_fail_vsl, sizeof(gui_event_fail_vsl),
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_fail_vsl);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue;
+            }
+            current_msg_num++; // Инкрементируем номер ПОСЛЕ успешной отправки
+
+            // ОЖИДАНИЕ ОТВЕТА "Состояние линии"
+            UvmResponseMessage response_sost_linii;
+            // SVM 2 (simulate_response_timeout) также НЕ ДОЛЖЕН ответить на эту команду.
+            bool got_sost_linii = wait_for_specific_response(
+                                        current_svm_id_for_loop,
+                                        MESSAGE_TYPE_SOSTOYANIE_LINII,
+                                        &response_sost_linii,
+                                        5000 // Таймаут 5 секунд
+                                    );
+
+            if (got_sost_linii) {
+                message_to_host_byte_order(&response_sost_linii.message);
+                SostoyanieLiniiBody* sost_l_body = (SostoyanieLiniiBody*)response_sost_linii.message.body;
+                uint16_t resp_msg_num_sl = get_full_message_number(&response_sost_linii.message.header);
+                uint16_t kla_host_sl = sost_l_body->kla; // Уже в хост-порядке
+                uint32_t sla_host_sl = sost_l_body->sla;
+                uint16_t ksa_host_sl = sost_l_body->ksa;
+
+                printf("UVM Main (SVM %d): Получено 'Состояние линии' (Num %u, LAK_resp 0x%02X, KLA %u, SLA %u, KSA %u, BCB 0x%08X).\n",
+                       current_svm_id_for_loop, resp_msg_num_sl, sost_l_body->lak, kla_host_sl, sla_host_sl, ksa_host_sl, sost_l_body->bcb);
+
+                // Отправляем RECV в GUI
+                char gui_recv_msg_sl[512];
+                char bcb_field_gui_sl[32];
+                snprintf(bcb_field_gui_sl, sizeof(bcb_field_gui_sl), ";BCB:0x%08X", sost_l_body->bcb);
+                char details_gui_sl[128];
+                snprintf(details_gui_sl, sizeof(details_gui_sl), "KLA=%u;SLA=%u;KSA=%u", kla_host_sl, sla_host_sl, ksa_host_sl);
+
+                snprintf(gui_recv_msg_sl, sizeof(gui_recv_msg_sl),
+                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
+                         current_svm_id_for_loop,
+                         response_sost_linii.message.header.message_type,
+                         resp_msg_num_sl,
+                         response_sost_linii.message.header.address,
+                         bcb_field_gui_sl,
+                         details_gui_sl);
+                send_to_gui_socket(gui_recv_msg_sl);
+
+                // Проверка LAK
+                if (sost_l_body->lak != current_lak) {
+                    fprintf(stderr, "UVM Main (SVM %d): ОШИБКА! Несовпадение LAK в 'Состояние линии'. Ожидался 0x%02X, получен 0x%02X.\n",
+                           current_svm_id_for_loop, current_lak, sost_l_body->lak);
+                    pthread_mutex_lock(&uvm_links_mutex);
+                    svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                    svm_links[current_svm_id_for_loop].lak_mismatch_detected = true;
+                    // Отправка EVENT в GUI
+                    char gui_event_lak_sl[256];
+                    snprintf(gui_event_lak_sl, sizeof(gui_event_lak_sl),
+                             "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X,Msg=SostLinii",
+                             current_svm_id_for_loop, current_lak, sost_l_body->lak);
+                    send_to_gui_socket(gui_event_lak_sl);
+                    snprintf(gui_event_lak_sl, sizeof(gui_event_lak_sl),
+                             "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                             current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                    send_to_gui_socket(gui_event_lak_sl);
+                    pthread_mutex_unlock(&uvm_links_mutex);
+                    continue; // Пропускаем этап съемки для этого SVM
+                }
+                // "Состояние линии" получено успешно
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].last_recv_bcb = sost_l_body->bcb;
+                // Если до этого был WARNING и теперь все проверки прошли (нет LAKMismatch, ControlFailure, Timeout), можно вернуть ACTIVE.
+                // Это более сложная логика, пока оставим как есть. GUI покажет текущий статус.
+                // Отправим текущий статус в GUI для консистентности
+                char gui_event_status_sl[128];
+                snprintf(gui_event_status_sl, sizeof(gui_event_status_sl),
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, svm_links[current_svm_id_for_loop].status, current_lak);
+                send_to_gui_socket(gui_event_status_sl);
+                pthread_mutex_unlock(&uvm_links_mutex);
+
+            } else {
+                // Таймаут или другая ошибка ожидания
+                fprintf(stderr, "UVM Main (SVM %d): Не получен ответ 'Состояние линии'. Пропуск SVM.\n", current_svm_id_for_loop);
+                // ... (логика обработки таймаута, FAILED, EVENT в GUI, continue) ...
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                svm_links[current_svm_id_for_loop].response_timeout_detected = true;
+                char gui_event_timeout_sl[256];
+                snprintf(gui_event_timeout_sl, sizeof(gui_event_timeout_sl),
+                         "EVENT;SVM_ID:%d;Type:ResponseTimeout;Details:Cmd=VydatSostLinii,ExpectedReply=SostLinii", current_svm_id_for_loop);
+                send_to_gui_socket(gui_event_timeout_sl);
+                snprintf(gui_event_timeout_sl, sizeof(gui_event_timeout_sl),
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_timeout_sl);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue;
+            }
+
+            // Этап "Подготовка к сеансу наблюдения" успешно завершен для этого SVM
+            printf("UVM Main (SVM %d): Этап 'Подготовка к сеансу наблюдения' успешно завершен.\n", current_svm_id_for_loop);
 
             msg_counters[current_svm_id_for_loop] = current_msg_num; // Сохраняем инкрементированный номер
-        }
-    }
-    // wait_for_outstanding_sends(); // Оставляем, чтобы убедиться, что все отправлено перед следующей фазой
-
+        } // конец if (should_init) -> теперь это if (мы успешно прошли все предыдущие шаги для этого SVM)
+    } // конец for по SVM
+    // wait_for_outstanding_sends(); // Эту функцию здесь можно убрать, так как мы ждем каждый ответ индивидуально.
+                                     // Или оставить, если send_uvm_request все еще просто кладет в очередь,
+                                     // а мы хотим дождаться фактической отправки перед переходом к следующему этапу.
+                                     // Пока лучше оставить, чтобы не сломать send_uvm_request, если он асинхронный.
+    printf("\nUVM: Все команды этапа 'Подготовка к сеансу наблюдения' обработаны.\n");
+	
     printf("\n--- Подготовка к сеансу съемки ---\n");
     printf("DEBUG UVM: Mode before sending parameters: %d\n", mode); // <-- ЕЩЕ ОДНА ПРОВЕРКА
      for (int i = 0; i < num_svms_in_config; ++i) {
