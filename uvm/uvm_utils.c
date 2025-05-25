@@ -5,12 +5,16 @@
  * Вспомогательные функции для модуля UVM.
  */
 #include "uvm_utils.h" // Для UvmRequestType
-#include "uvm_types.h" // Для UvmRequestType
+#include "uvm_types.h" // Для UvmResponseMessage, UvmSvmLink, MessageType, MAX_SVM_INSTANCES
 #include <pthread.h> // Для pthread_self, если понадобится для отладки
 #include <unistd.h>  // Для usleep
 #include <time.h>    // Для clock_gettime, timersub
 #include <stdio.h>     // Для NULL
 #include <string.h>
+#include "../utils/ts_uvm_resp_queue.h" // Для ThreadSafeUvmRespQueue и uvq_dequeue
+#include "../protocol/message_utils.h"   // Для get_full_message_number, message_to_host_byte_order
+#include <arpa/inet.h>                  // Для ntohs, ntohl
+#include "../config/config.h"            // Для MAX_SVM_INSTANCES (если он не определен в uvm_types.h напрямую)
 
 extern ThreadSafeUvmRespQueue *uvm_incoming_response_queue;
 extern volatile bool uvm_keep_running;
