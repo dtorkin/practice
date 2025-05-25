@@ -6,6 +6,9 @@
  */
 #include "uvm_utils.h" // Для UvmRequestType
 #include "uvm_types.h" // Для UvmRequestType
+#include <pthread.h> // Для pthread_self, если понадобится для отладки
+#include <unistd.h>  // Для usleep
+#include <time.h>    // Для clock_gettime, timersub
 #include <stdio.h>     // Для NULL
 
 extern ThreadSafeUvmRespQueue *uvm_incoming_response_queue;
@@ -41,7 +44,7 @@ bool wait_for_specific_response(
     UvmResponseMessage current_response_data; // Локальный буфер для dequeue
 
     while (uvm_keep_running) {
-        clock_gettime(CLOCK_MONOTONIC, ¤t_time);
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
         if (current_time.tv_sec > deadline.tv_sec || (current_time.tv_sec == deadline.tv_sec && current_time.tv_nsec >= deadline.tv_nsec)) {
             fprintf(stderr, "UVM (SVM %d): Таймаут ожидания ответа типа %d.\n", target_svm_id, expected_msg_type);
             return false; // Таймаут
@@ -52,7 +55,7 @@ bool wait_for_specific_response(
         // и небольшой паузы, если очередь пуста.
         // Более корректно было бы использовать pthread_cond_timedwait для самой очереди,
         // но это усложнит ts_uvm_resp_queue.c
-        if (uvq_dequeue(uvm_incoming_response_queue, ¤t_response_data)) {
+        if (uvq_dequeue(uvm_incoming_response_queue, &current_response_data)) {
             // Сообщение получено
             if (current_response_data.source_svm_id == target_svm_id) {
                 // Обновляем время активности для этого SVM
@@ -66,7 +69,7 @@ bool wait_for_specific_response(
 
                 if (current_response_data.message.header.message_type == expected_msg_type) {
                     // Это ожидаемый ответ!
-                    memcpy(response_message_out, ¤t_response_data, sizeof(UvmResponseMessage));
+                    memcpy(response_message_out, &current_response_data, sizeof(UvmResponseMessage));
                     printf("UVM (SVM %d): Получен ожидаемый ответ типа %d.\n", target_svm_id, expected_msg_type);
                     return true;
                 } else {
@@ -75,7 +78,7 @@ bool wait_for_specific_response(
                     fprintf(stderr, "UVM (SVM %d): Получено сообщение типа %d (номер %u), ожидался тип %d. Обрабатываем как асинхронное...\n",
                            target_svm_id,
                            current_response_data.message.header.message_type,
-                           get_full_message_number(¤t_response_data.message.header),
+                           get_full_message_number(&current_response_data.message.header),
                            expected_msg_type);
 
                     // Отправляем это "неожиданное" сообщение в GUI
@@ -100,7 +103,7 @@ bool wait_for_specific_response(
                             if (current_response_data.message.header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE &&
                                 ntohs(current_response_data.message.header.body_length) >= sizeof(PreduprezhdenieBody)) {
                                 PreduprezhdenieBody *warn_body = (PreduprezhdenieBody*)current_response_data.message.body;
-                                message_to_host_byte_order(¤t_response_data.message); // Преобразуем для чтения
+                                message_to_host_byte_order(&current_response_data.message); // Преобразуем для чтения
                                 snprintf(details_field, sizeof(details_field), "TKS=%u", warn_body->tks);
                                 snprintf(bcb_field, sizeof(bcb_field), ";BCB:0x%08X", ntohl(warn_body->bcb)); // BCB есть в Предупреждении
                                 bcb_present = true;
@@ -131,7 +134,7 @@ bool wait_for_specific_response(
                              "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
                              target_svm_id,
                              current_response_data.message.header.message_type,
-                             get_full_message_number(¤t_response_data.message.header),
+                             get_full_message_number(&current_response_data.message.header),
                              current_response_data.message.header.address, // Адрес отправителя (SVM)
                              bcb_present ? bcb_field : "",
                              details_field);
@@ -150,7 +153,7 @@ bool wait_for_specific_response(
                          "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X;Details:Forwarded during wait for SVM %d",
                          current_response_data.source_svm_id,
                          current_response_data.message.header.message_type,
-                         get_full_message_number(¤t_response_data.message.header),
+                         get_full_message_number(&current_response_data.message.header),
                          current_response_data.message.header.address,
                          target_svm_id);
                 send_to_gui_socket(gui_buffer_other);
