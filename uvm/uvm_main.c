@@ -571,43 +571,147 @@ int main(int argc, char *argv[]) {
     printf("\n--- Подготовка к сеансу наблюдения ---\n");
     for (int i = 0; i < num_svms_in_config; ++i) {
         pthread_mutex_lock(&uvm_links_mutex);
-        bool should_send = (svm_links[i].status == UVM_LINK_ACTIVE);
+        bool should_init = (svm_links[i].status == UVM_LINK_ACTIVE); // Изменил имя для ясности
         LogicalAddress current_lak = svm_links[i].assigned_lak;
+        // Сохраним ID, так как он может понадобиться после unlock
+        int current_svm_id_for_loop = svm_links[i].id;
         pthread_mutex_unlock(&uvm_links_mutex);
 
-        if (should_send) {
-            request.target_svm_id = i;
-            uint16_t current_msg_num = msg_counters[i]; // Берем текущий номер для этого SVM
+        if (should_init) {
+            request.target_svm_id = current_svm_id_for_loop; // Используем сохраненный ID
+            uint16_t current_msg_num = msg_counters[current_svm_id_for_loop];
 
             // 1. Инициализация канала
+            printf("UVM Main (SVM %d): Отправка 'Инициализация канала' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
             request.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, current_lak, current_msg_num++);
             InitChannelBody *init_body = (InitChannelBody *)request.message.body;
             init_body->lauvm = LOGICAL_ADDRESS_UVM_VAL;
-            init_body->lak = current_lak;
-            send_uvm_request(&request);
+            init_body->lak = current_lak; // LAK SVM, которому предназначено
+            if (!send_uvm_request(&request)) {
+                fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки 'Инициализация канала'. Пропуск SVM.\n", current_svm_id_for_loop);
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                 // Отправка события LinkStatus в GUI
+                char gui_event_fail[128];
+                snprintf(gui_event_fail, sizeof(gui_event_fail),
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_fail);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue;
+            }
 
-            // 2. Провести контроль
+            // ОЖИДАНИЕ ОТВЕТА "Подтверждение инициализации"
+            UvmResponseMessage response_confirm_init;
+            bool got_confirm_init = wait_for_specific_response(
+                                        current_svm_id_for_loop,
+                                        MESSAGE_TYPE_CONFIRM_INIT,
+                                        &response_confirm_init,
+                                        5000 // Таймаут 5 секунд
+                                    );
+
+            if (got_confirm_init) {
+                // Ответ получен, обрабатываем
+                message_to_host_byte_order(&response_confirm_init.message); // Преобразуем в хост-порядок
+                ConfirmInitBody* confirm_body = (ConfirmInitBody*)response_confirm_init.message.body;
+                uint16_t resp_msg_num = get_full_message_number(&response_confirm_init.message.header);
+
+                printf("UVM Main (SVM %d): Получено 'Подтверждение инициализации' (Num %u, LAK_resp 0x%02X, BCB 0x%08X).\n",
+                       current_svm_id_for_loop, resp_msg_num, confirm_body->lak, confirm_body->bcb);
+
+                // Отправляем RECV в GUI
+                char gui_recv_msg[512];
+                char bcb_field_gui[32];
+                snprintf(bcb_field_gui, sizeof(bcb_field_gui), ";BCB:0x%08X", confirm_body->bcb);
+                char details_gui[128];
+                snprintf(details_gui, sizeof(details_gui), "SLP=0x%02X;VDR=0x%02X;BOP1=0x%02X;BOP2=0x%02X",
+                         confirm_body->slp, confirm_body->vdr, confirm_body->bop1, confirm_body->bop2);
+
+                snprintf(gui_recv_msg, sizeof(gui_recv_msg),
+                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
+                         current_svm_id_for_loop,
+                         response_confirm_init.message.header.message_type,
+                         resp_msg_num,
+                         response_confirm_init.message.header.address, // LAK SVM из заголовка ответа
+                         bcb_field_gui,
+                         details_gui);
+                send_to_gui_socket(gui_recv_msg);
+
+                // Проверка LAK
+                if (confirm_body->lak != current_lak) {
+                    fprintf(stderr, "UVM Main (SVM %d): ОШИБКА! Несовпадение LAK в 'Подтверждение инициализации'. Ожидался 0x%02X, получен 0x%02X.\n",
+                           current_svm_id_for_loop, current_lak, confirm_body->lak);
+                    pthread_mutex_lock(&uvm_links_mutex);
+                    svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                    svm_links[current_svm_id_for_loop].lak_mismatch_detected = true;
+                    // Отправка EVENT в GUI
+                    char gui_event_lak[256];
+                    snprintf(gui_event_lak, sizeof(gui_event_lak),
+                             "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X",
+                             current_svm_id_for_loop, current_lak, confirm_body->lak);
+                    send_to_gui_socket(gui_event_lak);
+                    snprintf(gui_event_lak, sizeof(gui_event_lak), // Обновляем статус
+                             "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                             current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                    send_to_gui_socket(gui_event_lak);
+                    pthread_mutex_unlock(&uvm_links_mutex);
+                    continue; // Пропускаем остальные команды для этого SVM
+                }
+                // Инициализация прошла успешно для этого SVM
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].last_recv_bcb = confirm_body->bcb; // Сохраняем BCB
+                pthread_mutex_unlock(&uvm_links_mutex);
+
+            } else {
+                // Таймаут или другая ошибка ожидания
+                fprintf(stderr, "UVM Main (SVM %d): Не получен ответ 'Подтверждение инициализации'. Пропуск SVM.\n", current_svm_id_for_loop);
+                pthread_mutex_lock(&uvm_links_mutex);
+                svm_links[current_svm_id_for_loop].status = UVM_LINK_FAILED;
+                svm_links[current_svm_id_for_loop].response_timeout_detected = true; // Флаг таймаута ответа на команду
+                // Отправка EVENT в GUI
+                char gui_event_timeout[256];
+                snprintf(gui_event_timeout, sizeof(gui_event_timeout),
+                         "EVENT;SVM_ID:%d;Type:ResponseTimeout;Details:Cmd=InitChannel,ExpectedReply=ConfirmInit", current_svm_id_for_loop);
+                send_to_gui_socket(gui_event_timeout);
+                snprintf(gui_event_timeout, sizeof(gui_event_timeout), // Обновляем статус
+                         "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                         current_svm_id_for_loop, UVM_LINK_FAILED, current_lak);
+                send_to_gui_socket(gui_event_timeout);
+                pthread_mutex_unlock(&uvm_links_mutex);
+                continue; // Пропускаем остальные команды для этого SVM
+            }
+
+            // Если дошли сюда, значит "Инициализация канала" -> "Подтверждение инициализации" прошли успешно.
+            // Теперь можно отправлять "Провести контроль" и т.д.
+            // Пока что для этого первого шага, остальные команды оставим как были (отправляются без ожидания).
+            // TODO: В следующих шагах добавить wait_for_specific_response и для них.
+
+            // 2. Провести контроль (пока без ожидания ответа)
+            printf("UVM Main (SVM %d): Отправка 'Провести контроль' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
             request.message = create_provesti_kontrol_message(current_lak, 0x01, current_msg_num++);
             ProvestiKontrolBody *pk_body = (ProvestiKontrolBody *)request.message.body;
-            pk_body->tk = 0x01;
-            request.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-            send_uvm_request(&request);
+            pk_body->tk = 0x01; // Например, запросить все контроли
+            request.message.header.body_length = htons(sizeof(ProvestiKontrolBody)); // Убедимся, что длина тела корректна
+            if (!send_uvm_request(&request)) { /* ... обработка ошибки ... */ continue; }
 
-            // 3. Выдать результаты контроля
+
+            // 3. Выдать результаты контроля (пока без ожидания ответа)
+            printf("UVM Main (SVM %d): Отправка 'Выдать результаты контроля' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
             request.message = create_vydat_rezultaty_kontrolya_message(current_lak, 0x0F, current_msg_num++);
             VydatRezultatyKontrolyaBody *vrk_body = (VydatRezultatyKontrolyaBody *)request.message.body;
-            vrk_body->vrk = 0x0F;
+            vrk_body->vrk = 0x0F; // Запросить все результаты
             request.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-            send_uvm_request(&request);
+             if (!send_uvm_request(&request)) { /* ... обработка ошибки ... */ continue; }
 
-            // 4. Выдать состояние линии
+            // 4. Выдать состояние линии (пока без ожидания ответа)
+            printf("UVM Main (SVM %d): Отправка 'Выдать состояние линии' (LAK 0x%02X, Num %u)...\n", current_svm_id_for_loop, current_lak, current_msg_num);
             request.message = create_vydat_sostoyanie_linii_message(current_lak, current_msg_num++);
-            send_uvm_request(&request);
+             if (!send_uvm_request(&request)) { /* ... обработка ошибки ... */ continue; }
 
-            msg_counters[i] = current_msg_num; // Сохраняем инкрементированный номер
+            msg_counters[current_svm_id_for_loop] = current_msg_num; // Сохраняем инкрементированный номер
         }
     }
-    wait_for_outstanding_sends();
+    // wait_for_outstanding_sends(); // Оставляем, чтобы убедиться, что все отправлено перед следующей фазой
 
     printf("\n--- Подготовка к сеансу съемки ---\n");
     printf("DEBUG UVM: Mode before sending parameters: %d\n", mode); // <-- ЕЩЕ ОДНА ПРОВЕРКА
