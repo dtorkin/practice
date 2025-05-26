@@ -133,14 +133,6 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
 		table->setItem(row, 5, new QTableWidgetItem(msgName)); // сдвигается
 		table->setItem(row, 6, new QTableWidgetItem(QString::number(msgNum))); // сдвигается
 		table->setItem(row, 7, new QTableWidgetItem(details)); // сдвигается
-
-        // Обновляем отдельный QLabel для BCB
-        if (m_bcbLabels.size() > svmId && m_bcbLabels[svmId] && bcbFromEvent != 0) { // Используем bcbFromEvent
-            if (bcbFromEvent != m_lastDisplayedBcb[svmId]) {
-                m_bcbLabels[svmId]->setText(QString("0x%1").arg(bcbFromEvent, 8, 16, QChar('0')).toUpper());
-                m_lastDisplayedBcb[svmId] = bcbFromEvent;
-            }
-        }
     } else { // EVENT
 		table->setItem(row, 3, new QTableWidgetItem("-")); // BCB для EVENT
 		table->setItem(row, 4, new QTableWidgetItem("-"));
