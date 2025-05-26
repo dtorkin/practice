@@ -45,6 +45,7 @@ typedef struct {
     // --- Настройки для UVM ---
     EthernetConfig uvm_ethernet_target; // Параметры цели для UVM
     SerialConfig serial;                // Параметры Serial
+	int uvm_keepalive_timeout_sec;
 
 } AppConfig;
 

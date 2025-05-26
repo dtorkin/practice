@@ -41,7 +41,7 @@ static int config_handler(void* user, const char* section, const char* name,
              return 1;
         }
     } else {
-        int sscanf_res_set = sscanf(section, "svm_settings_%d", &svm_id);
+        int sscanf_res_set = sscanf(section, "settings_svm%d", &svm_id);
          if (sscanf_res_set == 1) {
             if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
                  if (strcasecmp(name, "lak") == 0) {
@@ -56,7 +56,9 @@ static int config_handler(void* user, const char* section, const char* name,
                       pconfig->svm_settings[svm_id].send_warning_on_confirm = parse_ini_boolean(value);
                  } else if (strcasecmp(name, "warning_tks") == 0) {
                       pconfig->svm_settings[svm_id].warning_tks = (uint8_t)atoi(value);
-                 }
+                 } else if (MATCH("communication", "uvm_keepalive_timeout_sec")) { // Или другая подходящая секция, например [uvm_settings]
+					  pconfig->uvm_keepalive_timeout_sec = atoi(value);
+				 }
                  // Отмечаем, что конфиг для этого ID загружен, если ЛЮБОЙ параметр прочитан
                  pconfig->svm_config_loaded[svm_id] = true;
                  return 1;
@@ -103,6 +105,7 @@ int load_config(const char *filename, AppConfig *config) {
     config->serial.data_bits = 8;
     strcpy(config->serial.parity, "none");
     config->serial.stop_bits = 1;
+	config->uvm_keepalive_timeout_sec = 15;
 
     // Устанавливаем дефолты для всех слотов SVM
     for (int i = 0; i < MAX_SVM_INSTANCES; ++i) {

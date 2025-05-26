@@ -607,7 +607,6 @@ int main(int argc, char *argv[]) {
     const time_t TIMEOUT_CONFIRM_KONTROL_S_MAIN = 12; // Учитывая возможную задержку SVM при самоконтроле
     const time_t TIMEOUT_RESULTS_KONTROL_S_MAIN = 8;  // SVM может "думать" до 6с + передача
     const time_t TIMEOUT_LINE_STATUS_S_MAIN = 5;
-    const time_t KEEP_ALIVE_TIMEOUT_SEC_MAIN = 15; // Таймаут для общего Keep-Alive
 
     // Инициализируем начальное состояние подготовки для всех активных TCP-линков
     pthread_mutex_lock(&uvm_links_mutex);
@@ -1021,7 +1020,7 @@ int main(int argc, char *argv[]) {
             if (link_ka->status == UVM_LINK_ACTIVE && // Только для активных
                 link_ka->prep_state != PREP_STATE_FAILED && // И не в ошибке подготовки
                 link_ka->last_activity_time > 0 &&
-                (now_keep_alive_check - link_ka->last_activity_time) > KEEP_ALIVE_TIMEOUT_SEC_MAIN)
+                (now_keep_alive_check - link_ka->last_activity_time) > config.uvm_keepalive_timeout_sec)
             {
                 fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT detected for SVM ID %d! (Last activity %ld s ago)\n",
                         ka_idx, (now_keep_alive_check - link_ka->last_activity_time));
