@@ -567,734 +567,568 @@ int main(int argc, char *argv[]) {
 
     printf("UVM: All necessary threads started. Selected RadarMode: %d\n", mode);
 
-
-    printf("UVM: Начало основного цикла управления SVM (Параллельная подготовка)...\n");
+    // --- Новый основной цикл управления SVM с машиной состояний ---
+    printf("UVM: Начало основного цикла управления SVM (Асинхронная подготовка)...\n");
     UvmResponseMessage response_msg_data_main; // Для чтения из очереди ответов
     char gui_buffer_main_loop[512];          // Буфер для сообщений в GUI
 
     // Таймауты для разных ответов (в секундах)
     const time_t TIMEOUT_CONFIRM_INIT_S_MAIN = 5;
-    const time_t TIMEOUT_CONFIRM_KONTROL_S_MAIN = 12; // Учитывая возможную задержку SVM (sleep(1)+sleep(10))
+    const time_t TIMEOUT_CONFIRM_KONTROL_S_MAIN = 12; // Учитывая возможную задержку SVM при самоконтроле
     const time_t TIMEOUT_RESULTS_KONTROL_S_MAIN = 8;  // SVM может "думать" до 6с + передача
     const time_t TIMEOUT_LINE_STATUS_S_MAIN = 5;
+    const time_t KEEP_ALIVE_TIMEOUT_SEC_MAIN = 15; // Таймаут для общего Keep-Alive
 
-    bool all_svms_preparation_done_or_failed = false;
+    // Инициализируем начальное состояние подготовки для всех активных TCP-линков
+    pthread_mutex_lock(&uvm_links_mutex);
+    for (int i = 0; i < num_svms_in_config; ++i) {
+        if (config.svm_config_loaded[i] && svm_links[i].status == UVM_LINK_ACTIVE) {
+            svm_links[i].prep_state = PREP_STATE_NOT_STARTED; // Начальное состояние для отправки InitChannel
+            svm_links[i].current_preparation_msg_num = 0;     // Сброс счетчика сообщений подготовки
+            svm_links[i].last_command_sent_time = 0;          // Сброс времени последней команды
+        } else if (config.svm_config_loaded[i]) { // Если сконфигурирован, но TCP не активен
+            svm_links[i].prep_state = PREP_STATE_FAILED;      // Сразу в ошибку подготовки
+        }
+    }
+    pthread_mutex_unlock(&uvm_links_mutex);
 
-    while (uvm_keep_running && !all_svms_preparation_done_or_failed) {
-        bool processed_in_iteration = false;
-        all_svms_preparation_done_or_failed = true; // Предполагаем, что все завершили/отвалились
 
-        // === БЛОК A: ПРОВЕРКА И ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
+    while (uvm_keep_running) {
+        bool processed_something_this_iteration = false; // Флаг, что на этой итерации что-то сделали
+
+        // === БЛОК 1: ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
         pthread_mutex_lock(&uvm_links_mutex);
         for (int i = 0; i < num_svms_in_config; ++i) {
             if (!config.svm_config_loaded[i]) continue;
             UvmSvmLink *link = &svm_links[i];
 
-            // Если SVM еще не завершил подготовку и не в ошибке, то предполагаем, что не все завершено
-            if (link->status == UVM_LINK_ACTIVE &&
-                link->prep_state != PREP_STATE_PREPARATION_COMPLETE &&
-                link->prep_state != PREP_STATE_FAILED) {
-                all_svms_preparation_done_or_failed = false; // Хотя бы один еще в процессе
-            }
+            if (link->status == UVM_LINK_ACTIVE) { // Работаем только с активными TCP-линками
+                UvmRequest request_prep_send;
+                request_prep_send.type = UVM_REQ_SEND_MESSAGE;
+                request_prep_send.target_svm_id = i;
+                bool command_to_send_prepared = false;
+                MessageType sent_command_type_for_state_change = (MessageType)0;
 
-            if (link->status != UVM_LINK_ACTIVE) { // Работаем только с активными TCP-линками
-                if (link->prep_state != PREP_STATE_FAILED && link->prep_state != PREP_STATE_NOT_STARTED) {
-                    link->prep_state = PREP_STATE_FAILED; // Если TCP упал во время подготовки
+                switch (link->prep_state) {
+                    case PREP_STATE_NOT_STARTED: // Готов отправить "Инициализация канала"
+                        request_prep_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
+                        InitChannelBody *init_b_send = (InitChannelBody*)request_prep_send.message.body;
+                        init_b_send->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_send->lak = link->assigned_lak;
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
+                        sent_command_type_for_state_change = MESSAGE_TYPE_INIT_CHANNEL;
+                        command_to_send_prepared = true;
+                        printf("UVM Main (SVM %d): Подготовка к отправке 'Инициализация канала' (Num %u).\n", i, link->current_preparation_msg_num);
+                        break;
+
+                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // ConfirmInit получен, готов отправить "Провести контроль"
+                        request_prep_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
+                        ProvestiKontrolBody* pk_b_send = (ProvestiKontrolBody*)request_prep_send.message.body; pk_b_send->tk = 0x01;
+                        request_prep_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
+                        sent_command_type_for_state_change = MESSAGE_TYPE_PROVESTI_KONTROL;
+                        command_to_send_prepared = true;
+                        printf("UVM Main (SVM %d): Подготовка к отправке 'Провести контроль' (Num %u).\n", i, link->current_preparation_msg_num);
+                        break;
+
+                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // PodtverzhdenieKontrolya получено, готов отправить "Выдать результаты"
+                        request_prep_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
+                        VydatRezultatyKontrolyaBody* vrk_b_send = (VydatRezultatyKontrolyaBody*)request_prep_send.message.body; vrk_b_send->vrk = 0x0F;
+                        request_prep_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                        sent_command_type_for_state_change = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                        command_to_send_prepared = true;
+                        printf("UVM Main (SVM %d): Подготовка к отправке 'Выдать результаты контроля' (Num %u).\n", i, link->current_preparation_msg_num);
+                        break;
+
+                    case PREP_STATE_AWAITING_LINE_STATUS: // RezultatyKontrolya получены, готов отправить "Выдать состояние линии"
+                        request_prep_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                        sent_command_type_for_state_change = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                        command_to_send_prepared = true;
+                        printf("UVM Main (SVM %d): Подготовка к отправке 'Выдать состояние линии' (Num %u).\n", i, link->current_preparation_msg_num);
+                        break;
+
+                    default: // В состояниях ожидания ответа или FAILED/COMPLETE команды не отправляем
+                        break;
                 }
-                continue;
-            }
 
-            UvmRequest request_prep_main; // Используем другое имя, чтобы не конфликтовать с глобальной request
-            request_prep_main.type = UVM_REQ_SEND_MESSAGE;
-            request_prep_main.target_svm_id = i;
-            bool should_send_cmd_main = false;
-            MessageType cmd_to_send_type = (MessageType)0; // Для логирования
-
-            switch (link->prep_state) {
-                case PREP_STATE_NOT_STARTED:
-                    cmd_to_send_type = MESSAGE_TYPE_INIT_CHANNEL;
-                    request_prep_main.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
-                    InitChannelBody *init_b = (InitChannelBody*)request_prep_main.message.body;
-                    init_b->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b->lak = link->assigned_lak;
-                    should_send_cmd_main = true;
-                    break;
-
-                case PREP_STATE_AWAITING_CONFIRM_KONTROL: // Это состояние означает: ConfirmInit получен, ПОРА СЛАТЬ ProvestiKontrol
-                    cmd_to_send_type = MESSAGE_TYPE_PROVESTI_KONTROL;
-                    request_prep_main.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
-                    ProvestiKontrolBody* pk_b = (ProvestiKontrolBody*)request_prep_main.message.body; pk_b->tk = 0x01;
-                    request_prep_main.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-                    should_send_cmd_main = true;
-                    break;
-
-                case PREP_STATE_AWAITING_RESULTS_KONTROL: // PodtverzhdenieKontrolya получено, ПОРА СЛАТЬ VydatRezultaty
-                    cmd_to_send_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
-                    request_prep_main.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
-                    VydatRezultatyKontrolyaBody* vrk_b = (VydatRezultatyKontrolyaBody*)request_prep_main.message.body; vrk_b->vrk = 0x0F;
-                    request_prep_main.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-                    should_send_cmd_main = true;
-                    break;
-
-                case PREP_STATE_AWAITING_LINE_STATUS: // RezultatyKontrolya получены, ПОРА СЛАТЬ VydatSostoyanieLinii
-                    cmd_to_send_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
-                    request_prep_main.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
-                    should_send_cmd_main = true;
-                    break;
-
-                // В состояниях ожидания ответа (_AWAITING_...) команды не отправляем из этого блока
-                case PREP_STATE_AWAITING_CONFIRM_INIT:
-                // Следующие состояния ожидания переименованы для ясности (см. ниже)
-                // case PREP_STATE_AWAITING_PODTV_KONTROL_REPLY:
-                // case PREP_STATE_AWAITING_REZ_KONTROL_REPLY:
-                // case PREP_STATE_AWAITING_LINE_STATUS_REPLY:
-                case PREP_STATE_PREPARATION_COMPLETE:
-                case PREP_STATE_FAILED:
-                    break; // Ничего не делаем
-            }
-
-            if (should_send_cmd_main) {
-                printf("UVM Main (SVM %d): Отправка команды подготовки типа %u (Num %u). Состояние до: %d\n",
-                       i, cmd_to_send_type, link->current_preparation_msg_num, link->prep_state);
-                link->last_sent_prep_cmd_type = cmd_to_send_type; // Запоминаем тип отправленной команды
-
-                if (send_uvm_request(&request_prep_main)) {
-                    link->last_command_sent_time = time(NULL);
-                    // Переводим в соответствующее состояние ОЖИДАНИЯ ответа
-                    if (cmd_to_send_type == MESSAGE_TYPE_INIT_CHANNEL) {
-                        link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT;
-                    } else if (cmd_to_send_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
-                        link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Ожидаем Подтверждение контроля
-                    } else if (cmd_to_send_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
-                        link->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Ожидаем Результаты контроля
-                    } else if (cmd_to_send_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
-                        link->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Ожидаем Состояние линии
+                if (command_to_send_prepared) {
+                    if (send_uvm_request(&request_prep_send)) {
+                        link->last_command_sent_time = time(NULL);
+                        // Переводим в соответствующее состояние ОЖИДАНИЯ ответа
+                        if (sent_command_type_for_state_change == MESSAGE_TYPE_INIT_CHANNEL) {
+                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT;
+                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_PROVESTI_KONTROL) {
+                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Ожидаем Подтверждение Контроля
+                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
+                            link->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Ожидаем Результаты Контроля
+                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+                            link->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Ожидаем Состояние Линии
+                        }
+                         printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
+                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
+                        // Номер сообщения link->current_preparation_msg_num инкрементируем при УСПЕШНОМ ПОЛУЧЕНИИ ОТВЕТА
+                    } else {
+                        fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки команды типа %u. Установка FAILED.\n", i, link->last_sent_prep_cmd_type);
+                        link->prep_state = PREP_STATE_FAILED;
+                        link->status = UVM_LINK_FAILED;
+                        char gui_event_send_fail_main[128];
+                        snprintf(gui_event_send_fail_main, sizeof(gui_event_send_fail_main),
+                                 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X,Reason=SendFailPrepCmd%u",
+                                 i, UVM_LINK_FAILED, link->assigned_lak, link->last_sent_prep_cmd_type);
+                        send_to_gui_socket(gui_event_send_fail_main);
                     }
-                    printf("UVM Main (SVM %d): Команда типа %u отправлена. Переход в состояние ожидания %d.\n", i, cmd_to_send_type, link->prep_state);
-                } else {
-                    fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки команды подготовки типа %u. Установка FAILED.\n", i, cmd_to_send_type);
-                    link->prep_state = PREP_STATE_FAILED;
-                    link->status = UVM_LINK_FAILED;
-                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
-                             "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X,Reason=SendFailPrepCmd%u",
-                             i, UVM_LINK_FAILED, link->assigned_lak, cmd_to_send_type);
-                    send_to_gui_socket(gui_buffer_main_loop);
+                    processed_something_this_iteration = true;
                 }
-                processed_in_iteration = true;
-            }
-        }
+            } // if link active
+        } // for each svm
         pthread_mutex_unlock(&uvm_links_mutex);
 
-        // === БЛОК B: ОБРАБОТКА ВХОДЯЩИХ ОТВЕТОВ ===
+
+        // === БЛОК 2: ОБРАБОТКА ВХОДЯЩИХ ОТВЕТОВ ===
         if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data_main)) {
-            processed_in_iteration = true;
+            processed_something_this_iteration = true;
             int svm_id_resp = response_msg_data_main.source_svm_id;
             Message *msg_resp = &response_msg_data_main.message;
-            message_to_host_byte_order(msg_resp);
+            message_to_host_byte_order(msg_resp); // Преобразуем в хост-порядок
             uint16_t msg_num_resp = get_full_message_number(&msg_resp->header);
 
             pthread_mutex_lock(&uvm_links_mutex);
             if (svm_id_resp >= 0 && svm_id_resp < num_svms_in_config) {
                 UvmSvmLink *link_resp = &svm_links[svm_id_resp];
-                link_resp->last_activity_time = time(NULL);
+                link_resp->last_activity_time = time(NULL); // Обновляем активность
 
-                char gui_details_resp[256] = "N/A";
+                char gui_details_resp[256] = "N/A"; // Дефолт для деталей
                 char gui_bcb_field_resp[32] = "";
                 bool bcb_present_resp = false;
-                bool send_link_status_event_after_recv = false;
-                UvmLinkStatus old_status_for_event = link_resp->status;
+                bool is_expected_reply = false;
+                bool reply_is_ok = true; // Флаг, что ответ корректен по содержанию
+                UvmLinkStatus status_before_processing_reply = link_resp->status;
 
-                // --- Логика извлечения деталей и BCB для GUI (должна быть здесь) ---
+                // --- Извлечение деталей и BCB для GUI ---
                 switch(msg_resp->header.message_type) {
                     case MESSAGE_TYPE_CONFIRM_INIT:
-                        if(msg_resp->header.body_length >= sizeof(ConfirmInitBody)) {
-                            ConfirmInitBody *body = (ConfirmInitBody*)msg_resp->body;
-                            link_resp->last_recv_bcb = body->bcb; // BCB уже в host order после message_to_host_byte_order
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", link_resp->last_recv_bcb);
-                            bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "SLP=0x%02X;VDR=0x%02X;BOP1=0x%02X;BOP2=0x%02X",
-                                     body->slp, body->vdr, body->bop1, body->bop2);
+                        if (msg_resp->header.body_length >= sizeof(ConfirmInitBody)) {
+                            ConfirmInitBody* cib_r = (ConfirmInitBody*)msg_resp->body;
+                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", cib_r->bcb); bcb_present_resp = true;
+                            snprintf(gui_details_resp, sizeof(gui_details_resp), "SLP=0x%02X;VDR=0x%02X;BOP1=0x%02X;BOP2=0x%02X", cib_r->slp, cib_r->vdr, cib_r->bop1, cib_r->bop2);
+                            link_resp->last_recv_bcb = cib_r->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA:
-                        if(msg_resp->header.body_length >= sizeof(PodtverzhdenieKontrolyaBody)) {
-                            PodtverzhdenieKontrolyaBody *body = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
-                            link_resp->last_recv_bcb = body->bcb;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", link_resp->last_recv_bcb);
-                            bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TK=0x%02X", body->tk);
+                        if (msg_resp->header.body_length >= sizeof(PodtverzhdenieKontrolyaBody)) {
+                            PodtverzhdenieKontrolyaBody* pkb_r = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
+                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", pkb_r->bcb); bcb_present_resp = true;
+                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TK=0x%02X", pkb_r->tk);
+                            link_resp->last_recv_bcb = pkb_r->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_RESULTATY_KONTROLYA:
-                        if(msg_resp->header.body_length >= sizeof(RezultatyKontrolyaBody)) {
-                            RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody*)msg_resp->body;
-                            link_resp->last_recv_bcb = body->bcb;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", link_resp->last_recv_bcb);
-                            bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "RSK=0x%02X;VSK=%ums", body->rsk, body->vsk);
+                        if (msg_resp->header.body_length >= sizeof(RezultatyKontrolyaBody)) {
+                            RezultatyKontrolyaBody* rkb_r = (RezultatyKontrolyaBody*)msg_resp->body;
+                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", rkb_r->bcb); bcb_present_resp = true;
+                            snprintf(gui_details_resp, sizeof(gui_details_resp), "RSK=0x%02X;VSK=%ums", rkb_r->rsk, rkb_r->vsk);
+                            link_resp->last_recv_bcb = rkb_r->bcb;
+                            link_resp->last_control_rsk = rkb_r->rsk;
                         }
                         break;
                     case MESSAGE_TYPE_SOSTOYANIE_LINII:
-                        if(msg_resp->header.body_length >= sizeof(SostoyanieLiniiBody)) {
-                            SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg_resp->body;
-                            link_resp->last_recv_bcb = body->bcb;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", link_resp->last_recv_bcb);
-                            bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "KLA=%u;SLA=%u;KSA=%u", body->kla, body->sla, body->ksa);
+                        if (msg_resp->header.body_length >= sizeof(SostoyanieLiniiBody)) {
+                            SostoyanieLiniiBody* slb_r = (SostoyanieLiniiBody*)msg_resp->body;
+                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", slb_r->bcb); bcb_present_resp = true;
+                            snprintf(gui_details_resp, sizeof(gui_details_resp), "KLA=%u;SLA=%u;KSA=%u", slb_r->kla, slb_r->sla, slb_r->ksa);
+                            link_resp->last_recv_bcb = slb_r->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_PREDUPREZHDENIE:
-                         if(msg_resp->header.body_length >= sizeof(PreduprezhdenieBody)) {
-                            PreduprezhdenieBody *body = (PreduprezhdenieBody*)msg_resp->body;
-                            link_resp->last_recv_bcb = body->bcb;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", link_resp->last_recv_bcb);
-                            bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TKS=%u", body->tks);
+                        if (msg_resp->header.body_length >= sizeof(PreduprezhdenieBody)) {
+                            PreduprezhdenieBody* warn_b_r = (PreduprezhdenieBody*)msg_resp->body;
+                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", warn_b_r->bcb); bcb_present_resp = true;
+                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TKS=%u", warn_b_r->tks);
+                            link_resp->last_recv_bcb = warn_b_r->bcb;
                         }
                         break;
-                    default: // Для других типов сообщений (СУБК, КО и т.д., если они придут)
-                        strcpy(gui_details_resp,"Async Data"); // Или более специфично
+                    default: // Для СУБК, КО и т.д. - пока без деталей
+                        strcpy(gui_details_resp, "Data msg");
                         break;
                 }
-                // --- Отправка RECV в GUI ---
+                // Отправляем RECV в GUI
                 snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
                          "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
                          svm_id_resp, msg_resp->header.message_type, msg_num_resp,
                          msg_resp->header.address,
-                         bcb_present_resp ? gui_bcb_field_resp : "",
-                         gui_details_resp);
+                         bcb_present_resp ? gui_bcb_field_resp : "", gui_details_resp);
                 send_to_gui_socket(gui_buffer_main_loop);
 
-                // Логика переключения состояний подготовки
-                if (link_resp->status == UVM_LINK_ACTIVE || link_resp->status == UVM_LINK_WARNING) { // Обрабатываем ответы только от "живых"
-                    switch (link_resp->prep_state) {
-                        case PREP_STATE_AWAITING_CONFIRM_INIT:
-                            if (msg_resp->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
-                                ConfirmInitBody* ci_body_main = (ConfirmInitBody*)msg_resp->body; // BCB уже в host order
-                                printf("UVM Main (SVM %d): Обработан ответ 'Подтверждение инициализации'.\n", svm_id_resp);
-                                if (ci_body_main->lak == link_resp->assigned_lak) {
-                                    link_resp->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Готов к отправке "Провести контроль" на след. итерации
-                                    link_resp->current_preparation_msg_num++;
-                                } else {
-                                    fprintf(stderr, "UVM Main (SVM %d): LAK Mismatch! Expected 0x%02X, got 0x%02X\n", svm_id_resp, link_resp->assigned_lak, ci_body_main->lak);
-                                    link_resp->prep_state = PREP_STATE_FAILED; link_resp->status = UVM_LINK_FAILED;
-                                    link_resp->lak_mismatch_detected = true; send_link_status_event_after_recv = true;
-                                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X,Msg=ConfirmInit", svm_id_resp, link_resp->assigned_lak, ci_body_main->lak); send_to_gui_socket(gui_buffer_main_loop);
-                                }
-                            } // else если не тот тип - обработка ниже (асинхронные)
-                            break;
-
-                        case PREP_STATE_AWAITING_CONFIRM_KONTROL:
-                            if (msg_resp->header.message_type == MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
-                                printf("UVM Main (SVM %d): Обработан ответ 'Подтверждение контроля'.\n", svm_id_resp);
-                                link_resp->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL;
+                // --- Логика машины состояний подготовки ---
+                switch (link_resp->prep_state) {
+                    case PREP_STATE_AWAITING_CONFIRM_INIT:
+                        if (msg_resp->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
+                            is_expected_reply = true;
+                            ConfirmInitBody* ci_b_main = (ConfirmInitBody*)msg_resp->body;
+                            if (ci_b_main->lak != link_resp->assigned_lak) {
+                                fprintf(stderr, "UVM Main (SVM %d): LAK Mismatch в ConfirmInit! Expected 0x%02X, got 0x%02X\n", svm_id_resp, link_resp->assigned_lak, ci_b_main->lak);
+                                reply_is_ok = false; link_resp->lak_mismatch_detected = true;
+                                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X,Msg=ConfirmInit", svm_id_resp, link_resp->assigned_lak, ci_b_main->lak);
+                                send_to_gui_socket(gui_buffer_main_loop);
+                            }
+                            if (reply_is_ok) {
+                                link_resp->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Готов к отправке "Провести контроль"
                                 link_resp->current_preparation_msg_num++;
+                                printf("UVM Main (SVM %d): ConfirmInit OK. Переход в ожидание Подтверждения Контроля (для отправки Пров.Контр).\n", svm_id_resp);
                             }
-                            break;
+                        }
+                        break;
+                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // Ожидаем Подтверждение Контроля
+                        if (msg_resp->header.message_type == MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
+                            is_expected_reply = true;
+                            // PodtverzhdenieKontrolyaBody* pkb_main = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
+                            // (проверка LAK и TK, если необходимо)
+                            link_resp->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Готов к отправке "Выдать результаты"
+                            link_resp->current_preparation_msg_num++;
+                            printf("UVM Main (SVM %d): PodtverzhdenieKontrolya OK. Переход в ожидание Результатов Контроля (для отправки Выд.Рез.).\n", svm_id_resp);
+                        }
+                        break;
+                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // Ожидаем Результаты Контроля
+                        if (msg_resp->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
+                            is_expected_reply = true;
+                            RezultatyKontrolyaBody* rkb_main = (RezultatyKontrolyaBody*)msg_resp->body;
+                            if (rkb_main->rsk != 0x3F) {
+                                fprintf(stderr, "UVM Main (SVM %d): ПРЕДУПРЕЖДЕНИЕ! Ошибка контроля RSK=0x%02X в 'Результаты контроля'.\n", svm_id_resp, rkb_main->rsk);
+                                link_resp->control_failure_detected = true;
+                                link_resp->last_control_rsk = rkb_main->rsk;
+                                if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING; // Устанавливаем Warning
+                                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X", svm_id_resp, rkb_main->rsk);
+                                send_to_gui_socket(gui_buffer_main_loop);
+                            } else {
+                                if(link_resp->control_failure_detected) link_resp->control_failure_detected = false; // Сбрасываем, если был
+                            }
+                            link_resp->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Готов к отправке "Выдать состояние линии"
+                            link_resp->current_preparation_msg_num++;
+                            printf("UVM Main (SVM %d): RezultatyKontrolya обработаны. Переход в ожидание Состояния Линии (для отправки Выд.Сост.).\n", svm_id_resp);
+                        }
+                        break;
+                    case PREP_STATE_AWAITING_LINE_STATUS: // Ожидаем Состояние Линии
+                        if (msg_resp->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
+                            is_expected_reply = true;
+                            link_resp->prep_state = PREP_STATE_PREPARATION_COMPLETE;
+                            link_resp->current_preparation_msg_num++; // Это был последний номер для этапа подготовки
+                            printf("UVM Main (SVM %d): SostoyanieLinii OK. Этап 'Подготовка к сеансу наблюдения' ЗАВЕРШЕН.\n", svm_id_resp);
+                        }
+                        break;
+                    default: // Сообщение пришло, когда мы не ждали ответа этапа подготовки или уже завершили/ошибка
+                        break; 
+                }
 
-                        case PREP_STATE_AWAITING_RESULTS_KONTROL:
-                            if (msg_resp->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
-                                RezultatyKontrolyaBody* rk_body_main = (RezultatyKontrolyaBody*)msg_resp->body;
-                                printf("UVM Main (SVM %d): Обработан ответ 'Результаты контроля'. RSK=0x%02X\n", svm_id_resp, rk_body_main->rsk);
-                                if (rk_body_main->rsk != 0x3F) {
-                                    link_resp->control_failure_detected = true; link_resp->last_control_rsk = rk_body_main->rsk;
-                                    if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING;
-                                    send_link_status_event_after_recv = true;
-                                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X", svm_id_resp, rk_body_main->rsk); send_to_gui_socket(gui_buffer_main_loop);
-                                } else {
-                                    if(link_resp->control_failure_detected && link_resp->status == UVM_LINK_WARNING && !link_resp->lak_mismatch_detected && !link_resp->response_timeout_detected && link_resp->last_warning_tks == 0) {
-                                        // Если был WARNING только из-за RSK, и теперь RSK ОК, и нет других проблем
-                                        // link_resp->status = UVM_LINK_ACTIVE; // Осторожно с автоматическим возвратом в ACTIVE
-                                        // send_link_status_event_after_recv = true;
-                                    }
-                                    link_resp->control_failure_detected = false;
-                                }
-                                link_resp->prep_state = PREP_STATE_AWAITING_LINE_STATUS;
-                                link_resp->current_preparation_msg_num++;
-                            }
-                            break;
+                if (is_expected_reply && !reply_is_ok) { // Если ожидали, но ответ плохой
+                    link_resp->prep_state = PREP_STATE_FAILED;
+                    link_resp->status = UVM_LINK_FAILED;
+                }
 
-                        case PREP_STATE_AWAITING_LINE_STATUS:
-                            if (msg_resp->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
-                                printf("UVM Main (SVM %d): Обработан ответ 'Состояние линии'.\n", svm_id_resp);
-                                link_resp->prep_state = PREP_STATE_PREPARATION_COMPLETE;
-                                link_resp->current_preparation_msg_num++; // На всякий случай, хотя этот счетчик для команд подготовки
-                                printf("UVM Main (SVM %d): Этап 'Подготовка к сеансу наблюдения' УСПЕШНО ЗАВЕРШЕН.\n", svm_id_resp);
-                                send_link_status_event_after_recv = true; // Отправить текущий статус
-                            }
-                            break;
-                        default: // PREP_STATE_NOT_STARTED, PREP_STATE_PREPARATION_COMPLETE, PREP_STATE_FAILED или асинхронное сообщение
-                            if (link_resp->prep_state != PREP_STATE_PREPARATION_COMPLETE && link_resp->prep_state != PREP_STATE_FAILED) {
-                                // Если пришло асинхронное сообщение (не то, что ожидали по prep_state)
-                                if (msg_resp->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE) {
-                                    PreduprezhdenieBody *warn_b = (PreduprezhdenieBody*)msg_resp->body;
-                                    fprintf(stderr, "UVM Main (SVM %d): Асинхронно получено ПРЕДУПРЕЖДЕНИЕ TKS=%u в состоянии prep_state %d.\n", svm_id_resp, warn_b->tks, link_resp->prep_state);
-                                    link_resp->last_warning_tks = warn_b->tks; link_resp->last_warning_time = time(NULL);
-                                    if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING;
-                                    send_link_status_event_after_recv = true;
-                                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u", svm_id_resp, warn_b->tks); send_to_gui_socket(gui_buffer_main_loop);
-                                } else {
-                                     fprintf(stderr, "UVM Main (SVM %d): Получен неожиданный тип %u (Num %u) в состоянии prep_state %d.\n",
-                                           svm_id_resp, msg_resp->header.message_type, msg_num_resp, link_resp->prep_state);
-                                }
-                            } else if (link_resp->prep_state == PREP_STATE_PREPARATION_COMPLETE) {
-                                // Сюда могут приходить СУБК, КО и т.д. Их нужно будет обрабатывать отдельно.
-                                 printf("UVM Main (SVM %d): Получено сообщение тип %u (Num %u) после завершения подготовки.\n",
-                                           svm_id_resp, msg_resp->header.message_type, msg_num_resp);
-                            }
-                            break;
-                    } // end switch (link_resp->prep_state)
+                // Обработка асинхронного "Предупреждения" в любом состоянии
+                if (msg_resp->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE) {
+                    PreduprezhdenieBody *warn_b_main = (PreduprezhdenieBody*)msg_resp->body;
+                    fprintf(stderr, "UVM Main (SVM %d): Получено асинхронное ПРЕДУПРЕЖДЕНИЕ TKS=%u.\n", svm_id_resp, warn_b_main->tks);
+                    link_resp->last_warning_tks = warn_b_main->tks;
+                    link_resp->last_warning_time = time(NULL);
+                    if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING;
+                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u", svm_id_resp, warn_b_main->tks);
+                    send_to_gui_socket(gui_buffer_main_loop);
+                }
 
-                    if (send_link_status_event_after_recv || (link_resp->status != old_status_for_event)) {
-                         snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
-                                 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
-                                 svm_id_resp, link_resp->status, link_resp->assigned_lak);
-                        send_to_gui_socket(gui_buffer_main_loop);
-                    }
-                } // if link is active or warning
-            } // if svm_id_resp valid
+                // Отправляем событие об изменении статуса, если он изменился
+                if (link_resp->status != status_before_processing_reply) {
+                     snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
+                             "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
+                             svm_id_resp, link_resp->status, link_resp->assigned_lak);
+                    send_to_gui_socket(gui_buffer_main_loop);
+                }
+
+            } // if svm_id_resp_main valid
             pthread_mutex_unlock(&uvm_links_mutex);
         } // if uvq_dequeue
 
-        // === БЛОК C: ПРОВЕРКА ТАЙМАУТОВ ОЖИДАНИЯ ОТВЕТОВ НА КОМАНДЫ ПОДГОТОВКИ ===
+
+        // === БЛОК 3: ПРОВЕРКА ТАЙМАУТОВ ОЖИДАНИЯ ОТВЕТОВ НА КОМАНДЫ ПОДГОТОВКИ ===
         pthread_mutex_lock(&uvm_links_mutex);
         time_t now_timeout_check = time(NULL);
-        for (int k = 0; k < num_svms_in_config; ++k) {
-            if (!config.svm_config_loaded[k]) continue;
-            UvmSvmLink *link_to_check = &svm_links[k];
-            time_t current_timeout_s = 0;
-            const char* expected_cmd_name_for_timeout = "UnknownCmd";
-            MessageType expected_reply_for_timeout = (MessageType)0;
+        for (int k_to = 0; k_to < num_svms_in_config; ++k_to) {
+            if (!config.svm_config_loaded[k_to]) continue;
+            UvmSvmLink *link_check_to = &svm_links[k_to];
+            
+            if (link_check_to->status == UVM_LINK_ACTIVE && // Проверяем только для активных TCP
+                link_check_to->prep_state != PREP_STATE_PREPARATION_COMPLETE &&
+                link_check_to->prep_state != PREP_STATE_FAILED &&
+                link_check_to->prep_state != PREP_STATE_NOT_STARTED && // Не ждем ответа, если еще не отправили первую команду
+                link_check_to->last_command_sent_time > 0) { // Убедимся, что команда была отправлена
 
-            if (link_to_check->status == UVM_LINK_ACTIVE || link_to_check->status == UVM_LINK_WARNING) {
-                switch (link_to_check->prep_state) {
+                time_t current_timeout_val_s = 0;
+                const char* cmd_name_for_timeout_event = "UnknownCmd";
+                MessageType expected_reply_for_timeout_event = (MessageType)0;
+
+                switch(link_check_to->prep_state) {
                     case PREP_STATE_AWAITING_CONFIRM_INIT:
-                        current_timeout_s = TIMEOUT_CONFIRM_INIT_S_MAIN;
-                        expected_cmd_name_for_timeout = "InitChannel";
-                        expected_reply_for_timeout = MESSAGE_TYPE_CONFIRM_INIT;
+                        current_timeout_val_s = TIMEOUT_CONFIRM_INIT_S_MAIN;
+                        cmd_name_for_timeout_event = "InitChannel";
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_CONFIRM_INIT;
                         break;
                     case PREP_STATE_AWAITING_CONFIRM_KONTROL:
-                        current_timeout_s = TIMEOUT_CONFIRM_KONTROL_S_MAIN;
-                        expected_cmd_name_for_timeout = "ProvestiKontrol";
-                        expected_reply_for_timeout = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
+                        current_timeout_val_s = TIMEOUT_CONFIRM_KONTROL_S_MAIN;
+                        cmd_name_for_timeout_event = "ProvestiKontrol";
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
                         break;
                     case PREP_STATE_AWAITING_RESULTS_KONTROL:
-                        current_timeout_s = TIMEOUT_RESULTS_KONTROL_S_MAIN;
-                        expected_cmd_name_for_timeout = "VydatRezultatyKontrolya";
-                        expected_reply_for_timeout = MESSAGE_TYPE_RESULTATY_KONTROLYA;
+                        current_timeout_val_s = TIMEOUT_RESULTS_KONTROL_S_MAIN;
+                        cmd_name_for_timeout_event = "VydatRezultatyKontrolya";
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_RESULTATY_KONTROLYA;
                         break;
                     case PREP_STATE_AWAITING_LINE_STATUS:
-                        current_timeout_s = TIMEOUT_LINE_STATUS_S_MAIN;
-                        expected_cmd_name_for_timeout = "VydatSostoyanieLinii";
-                        expected_reply_for_timeout = MESSAGE_TYPE_SOSTOYANIE_LINII;
+                        current_timeout_val_s = TIMEOUT_LINE_STATUS_S_MAIN;
+                        cmd_name_for_timeout_event = "VydatSostoyanieLinii";
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_SOSTOYANIE_LINII;
                         break;
                     default: break;
                 }
 
-                if (current_timeout_s > 0 && link_to_check->last_command_sent_time > 0 &&
-                    (now_timeout_check - link_to_check->last_command_sent_time) > current_timeout_s) {
-                    
-                    fprintf(stderr, "UVM Main (SVM %d): ТАЙМАУТ! Не получен ответ типа %d на команду '%s' (тип %u) в течение %ld сек.\n",
-                           k, expected_reply_for_timeout, expected_cmd_name_for_timeout, link_to_check->last_sent_prep_cmd_type, current_timeout_s);
-                    link_to_check->prep_state = PREP_STATE_FAILED;
-                    link_to_check->status = UVM_LINK_FAILED;
-                    link_to_check->response_timeout_detected = true;
+                if (current_timeout_val_s > 0 && (now_timeout_check - link_check_to->last_command_sent_time) > current_timeout_val_s) {
+                    fprintf(stderr, "UVM Main (SVM %d): ТАЙМАУТ! Ожидался ответ типа %d на команду '%s' (тип %u).\n",
+                           k_to, expected_reply_for_timeout_event, cmd_name_for_timeout_event, link_check_to->last_sent_prep_cmd_type);
+                    link_check_to->prep_state = PREP_STATE_FAILED;
+                    link_check_to->status = UVM_LINK_FAILED;
+                    link_check_to->response_timeout_detected = true;
                     
                     snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
                              "EVENT;SVM_ID:%d;Type:ResponseTimeout;Details:Cmd=%s,ExpectedReplyType=%d",
-                             k, expected_cmd_name_for_timeout, expected_reply_for_timeout);
+                             k_to, cmd_name_for_timeout_event, expected_reply_for_timeout_event);
                     send_to_gui_socket(gui_buffer_main_loop);
                     
                     snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
                              "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
-                             k, UVM_LINK_FAILED, link_to_check->assigned_lak);
+                             k_to, UVM_LINK_FAILED, link_check_to->assigned_lak);
                     send_to_gui_socket(gui_buffer_main_loop);
-                    processed_in_iteration = true;
+                    processed_something_this_iteration = true;
                 }
             }
         }
         pthread_mutex_unlock(&uvm_links_mutex);
-        
-        // === БЛОК D: ПРОВЕРКА KEEP-ALIVE (остается как раньше) ===
-        // (ваш существующий код проверки Keep-Alive, он должен работать параллельно
-        //  и менять link->status на UVM_LINK_FAILED при необходимости)
 
-        if (!processed_in_iteration && uvm_keep_running) {
-            usleep(10000); // 10 мс, если ничего не произошло, чтобы не грузить CPU и дать шанс другим потокам
-        }
-    } // end while (uvm_keep_running && !all_svms_preparation_done_or_failed)
-
-    if (uvm_keep_running && all_svms_preparation_done_or_failed) {
-        printf("UVM: Все SVM либо завершили подготовку, либо отвалились.\n");
-    }
-	
-	
-
-    printf("\n--- Подготовка к сеансу съемки ---\n");
-    printf("DEBUG UVM: Mode before sending parameters: %d\n", mode); // <-- ЕЩЕ ОДНА ПРОВЕРКА
-     for (int i = 0; i < num_svms_in_config; ++i) {
+        // === БЛОК 4: ПРОВЕРКА KEEP-ALIVE (для общего таймаута неактивности) ===
+        time_t now_keep_alive_check = time(NULL);
         pthread_mutex_lock(&uvm_links_mutex);
-        bool should_send = (svm_links[i].status == UVM_LINK_ACTIVE);
-        LogicalAddress current_lak = svm_links[i].assigned_lak;
+        for (int ka_idx = 0; ka_idx < num_svms_in_config; ++ka_idx) {
+            if (!config.svm_config_loaded[ka_idx]) continue;
+            UvmSvmLink *link_ka = &svm_links[ka_idx];
+            if (link_ka->status == UVM_LINK_ACTIVE && // Только для активных
+                link_ka->prep_state != PREP_STATE_FAILED && // И не в ошибке подготовки
+                link_ka->last_activity_time > 0 &&
+                (now_keep_alive_check - link_ka->last_activity_time) > KEEP_ALIVE_TIMEOUT_SEC_MAIN)
+            {
+                fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT detected for SVM ID %d! (Last activity %ld s ago)\n",
+                        ka_idx, (now_keep_alive_check - link_ka->last_activity_time));
+                link_ka->status = UVM_LINK_FAILED;
+                link_ka->prep_state = PREP_STATE_FAILED; // Также помечаем подготовку как FAILED
+                link_ka->timeout_detected = true;
+                if (link_ka->connection_handle >= 0) {
+                    shutdown(link_ka->connection_handle, SHUT_RDWR); // Пытаемся уведомить receiver
+                }
+                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity for %ld sec", ka_idx, KEEP_ALIVE_TIMEOUT_SEC_MAIN);
+                send_to_gui_socket(gui_buffer_main_loop);
+                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", ka_idx, UVM_LINK_FAILED, link_ka->assigned_lak);
+                send_to_gui_socket(gui_buffer_main_loop);
+                processed_something_this_iteration = true;
+            }
+        }
         pthread_mutex_unlock(&uvm_links_mutex);
 
-        if (should_send) {
-             request.target_svm_id = i;
-             uint16_t current_msg_num = msg_counters[i];
-
-             // Отправка параметров в зависимости от режима
-             if (mode == MODE_DR) { // <-- Условие проверяет mode
-                 printf("UVM Main (SVM %d): Sending DR parameters...\n", i);
-                 request.message = create_prinyat_parametry_sdr_message(current_lak, current_msg_num++);
-                 PrinyatParametrySdrBodyBase sdr_body_base = {0}; sdr_body_base.pp_nl=(uint8_t)mode|1; sdr_body_base.q=htons(1500);
-                 memcpy(request.message.body, &sdr_body_base, sizeof(sdr_body_base));
-                 request.message.header.body_length = htons(sizeof(sdr_body_base));
-                 send_uvm_request(&request);
-
-                 request.message = create_prinyat_parametry_tsd_message(current_lak, current_msg_num++);
-                 PrinyatParametryTsdBodyBase tsd_body_base = {0}; tsd_body_base.nin=htons(100); tsd_body_base.nout=htons(100);
-                 memcpy(request.message.body, &tsd_body_base, sizeof(tsd_body_base));
-                 request.message.header.body_length = htons(sizeof(tsd_body_base));
-                 send_uvm_request(&request);
-
-             } else if (mode == MODE_OR || mode == MODE_OR1) { // <-- Условие проверяет mode
-                 printf("UVM Main (SVM %d): Sending OR/OR1 parameters...\n", i);
-                 request.message = create_prinyat_parametry_so_message(current_lak, current_msg_num++);
-                 PrinyatParametrySoBody so_body = {0}; so_body.pp=mode; so_body.knk=htons(400);
-                 memcpy(request.message.body, &so_body, sizeof(so_body));
-                 request.message.header.body_length = htons(sizeof(so_body));
-                 send_uvm_request(&request);
-
-                 request.message = create_prinyat_parametry_3tso_message(current_lak, current_msg_num++);
-                 PrinyatParametry3TsoBody tso_body = {0}; tso_body.Ncadr=htons(1024);
-                 memcpy(request.message.body, &tso_body, sizeof(tso_body));
-                 request.message.header.body_length = htons(sizeof(tso_body));
-                 send_uvm_request(&request);
-
-                 request.message = create_prinyat_time_ref_range_message(current_lak, current_msg_num++);
-                 PrinyatTimeRefRangeBody time_ref_body = {0};
-                 memcpy(request.message.body, &time_ref_body, sizeof(time_ref_body));
-                 request.message.header.body_length = htons(sizeof(time_ref_body));
-                 send_uvm_request(&request);
-
-                 request.message = create_prinyat_reper_message(current_lak, current_msg_num++);
-                 PrinyatReperBody reper_body = {0}; reper_body.NTSO1=htons(1);
-                 memcpy(request.message.body, &reper_body, sizeof(reper_body));
-                 request.message.header.body_length = htons(sizeof(reper_body));
-                 send_uvm_request(&request);
-
-             } else if (mode == MODE_VR) { // <-- Условие проверяет mode
-                 printf("UVM Main (SVM %d): Sending VR parameters...\n", i);
-                 request.message = create_prinyat_parametry_so_message(current_lak, current_msg_num++);
-                 PrinyatParametrySoBody so_body = {0}; so_body.pp=mode; so_body.knk=htons(500);
-                 memcpy(request.message.body, &so_body, sizeof(so_body));
-                 request.message.header.body_length = htons(sizeof(so_body));
-                 send_uvm_request(&request);
-
-                 request.message = create_prinyat_parametry_3tso_message(current_lak, current_msg_num++);
-                 PrinyatParametry3TsoBody tso_body = {0}; tso_body.Ncadr=htons(512);
-                 memcpy(request.message.body, &tso_body, sizeof(tso_body));
-                 request.message.header.body_length = htons(sizeof(tso_body));
-                 send_uvm_request(&request);
-             }
-
-             // Навигационные данные для всех режимов
-             printf("UVM Main (SVM %d): Sending NAV data...\n", i);
-             request.message = create_navigatsionnye_dannye_message(current_lak, current_msg_num++);
-             NavigatsionnyeDannyeBody nav_body = {0}; nav_body.mnd[0]=i;
-             memcpy(request.message.body, &nav_body, sizeof(nav_body));
-             request.message.header.body_length = htons(sizeof(nav_body));
-             send_uvm_request(&request);
-
-             msg_counters[i] = current_msg_num; // Сохраняем инкрементированный номер
-        }
-     }
-    wait_for_outstanding_sends();
-    printf("UVM: Все сообщения подготовки к съемке отправлены.\n");
-
-/******************************* Тест Отправки Дополнительных Команд *******************************
-	printf("\n--- Тест Отправки Дополнительных Команд ---\n");
-	int extra_commands_to_send = 10; // Отправим еще 10 команд каждому
-	for (int cmd_count = 0; cmd_count < extra_commands_to_send; ++cmd_count) {
-		if (!uvm_keep_running) break; // Выходим, если пришел сигнал
-		printf("Sending extra command batch %d/%d...\n", cmd_count + 1, extra_commands_to_send);
-		for (int i = 0; i < num_svms_in_config; ++i) {
-			pthread_mutex_lock(&uvm_links_mutex);
-			bool should_send = (svm_links[i].status == UVM_LINK_ACTIVE);
-			LogicalAddress current_lak = svm_links[i].assigned_lak;
-			pthread_mutex_unlock(&uvm_links_mutex);
-
-			if (should_send) {
-				request.target_svm_id = i;
-				// Отправляем "Выдать состояние линии"
-				request.message = create_vydat_sostoyanie_linii_message(current_lak, msg_counters[i]++); // Инкрементируем номер
-				send_uvm_request(&request);
-			}
-		}
-		wait_for_outstanding_sends(); // Ждем отправки этой пачки
-		sleep(1); // Небольшая пауза между пачками
-	}
-	printf("--- Конец Теста Отправки Дополнительных Команд ---\n");
-*************************** Конец Теста Отправки Дополнительных Команд ***************************/
-
-
-// --- Ожидание ответов и Keep-Alive / Таймауты ---
-    printf("UVM: Ожидание асинхронных сообщений от SVM (или Ctrl+C для завершения)...\n");
-    UvmResponseMessage response_msg_data;
-    char gui_msg_buffer[512]; // Объявляем здесь, чтобы была доступна везде в цикле
-
-    while (uvm_keep_running) {
-        bool message_received_in_this_iteration = false;
-        // Объявляем и инициализируем переменные для информации из сообщения
-        // в начале каждой итерации главного цикла
-        char details_for_gui[256] = "";
-        char bcb_field_for_gui[32] = "";
-        bool bcb_was_in_message = false;
-        LogicalAddress expected_lak_for_log = 0; // Для логирования в консоль UVM
-        // current_status будет получен из svm_links внутри блока if(uvq_dequeue)
-
-        if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data)) {
-            message_received_in_this_iteration = true;
-            int svm_id = response_msg_data.source_svm_id;
-            Message *msg = &response_msg_data.message;
-            uint16_t msg_num = get_full_message_number(&msg->header);
-
-            // --- Обновление данных в svm_links[svm_id] и подготовка данных для GUI ---
-            pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES
-                 UvmSvmLink *link = &svm_links[svm_id];
-                 expected_lak_for_log = link->assigned_lak; // Для лога UVM
-                 UvmLinkStatus current_link_status = link->status; // Локальная копия статуса
-
-                 if(current_link_status == UVM_LINK_ACTIVE) {
-                     link->last_activity_time = time(NULL);
-                     link->last_recv_msg_type = msg->header.message_type;
-                     link->last_recv_msg_num = msg_num;
-                     link->last_recv_msg_time = time(NULL);
-
-                     // Обработка тела для извлечения BCB и других деталей
-                     switch(msg->header.message_type) {
-                         case MESSAGE_TYPE_CONFIRM_INIT:
-                             if(ntohs(msg->header.body_length) >= sizeof(ConfirmInitBody)) {
-                                 ConfirmInitBody *body = (ConfirmInitBody*)msg->body;
-                                 link->last_recv_bcb = ntohl(body->bcb);
-                                 snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-                                 bcb_was_in_message = true;
-                                 if (body->lak != link->assigned_lak) {
-                                     link->lak_mismatch_detected = true;
-                                     link->status = UVM_LINK_FAILED;
-                                     // Строки для EVENT будут сформированы и отправлены позже, вне мьютекса
-                                 }
-                             }
-                             break;
-                         case MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA:
-                             if(ntohs(msg->header.body_length) >= sizeof(PodtverzhdenieKontrolyaBody)) {
-                                 PodtverzhdenieKontrolyaBody *body = (PodtverzhdenieKontrolyaBody*)msg->body;
-                                 link->last_recv_bcb = ntohl(body->bcb);
-                                 snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-                                 bcb_was_in_message = true;
-                                 snprintf(details_for_gui, sizeof(details_for_gui), "TK=0x%02X", body->tk);
-                             }
-                             break;
-                         case MESSAGE_TYPE_RESULTATY_KONTROLYA:
-                             if(ntohs(msg->header.body_length) >= sizeof(RezultatyKontrolyaBody)) {
-                                 RezultatyKontrolyaBody *body = (RezultatyKontrolyaBody*)msg->body;
-                                 link->last_recv_bcb = ntohl(body->bcb);
-                                 link->last_control_rsk = body->rsk;
-                                 snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-                                 bcb_was_in_message = true;
-                                 snprintf(details_for_gui, sizeof(details_for_gui), "RSK=0x%02X;VSK=%ums", body->rsk, ntohs(body->vsk));
-                                 if (body->rsk != 0x3F) {
-                                     link->control_failure_detected = true;
-                                     if(link->status == UVM_LINK_ACTIVE) link->status = UVM_LINK_WARNING;
-                                 }
-                             }
-                             break;
-						case MESSAGE_TYPE_SOSTOYANIE_LINII:
-							if(ntohs(msg->header.body_length) >= sizeof(SostoyanieLiniiBody)) {
-								SostoyanieLiniiBody *body = (SostoyanieLiniiBody*)msg->body;
-								link->last_recv_bcb = ntohl(body->bcb);
-								snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-								bcb_was_in_message = true;
-								uint16_t kla_host = ntohs(body->kla); // Локальные для snprintf
-								uint32_t sla_host = ntohl(body->sla);
-								uint16_t ksa_host = ntohs(body->ksa);
-								snprintf(details_for_gui, sizeof(details_for_gui), "KLA=%u;SLA=%u;KSA=%u", kla_host, sla_host, ksa_host);
-                             }
-                             break;
-                         case MESSAGE_TYPE_PREDUPREZHDENIE:
-                             if(ntohs(msg->header.body_length) >= sizeof(PreduprezhdenieBody)) {
-                                 PreduprezhdenieBody *body = (PreduprezhdenieBody*)msg->body;
-                                 link->last_recv_bcb = ntohl(body->bcb);
-                                 link->last_warning_tks = body->tks;
-                                 link->last_warning_time = time(NULL);
-                                 snprintf(bcb_field_for_gui, sizeof(bcb_field_for_gui), ";BCB:0x%08X", link->last_recv_bcb);
-                                 bcb_was_in_message = true;
-                                 snprintf(details_for_gui, sizeof(details_for_gui), "TKS=%u", body->tks);
-                             }
-                             break;
-                         default:
-                             break;
-                     } // end switch msg type
-                 } // end if current_link_status == ACTIVE
-            } // end if svm_id valid
-            pthread_mutex_unlock(&uvm_links_mutex);
-            // --- Конец обновления svm_links ---
-
-            // Проверяем статус линка ПОСЛЕ отпускания мьютекса (он мог измениться)
-            // для принятия решения об обработке и логгировании
-            pthread_mutex_lock(&uvm_links_mutex);
-            UvmLinkStatus status_for_processing = UVM_LINK_INACTIVE;
-            if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
-                 status_for_processing = svm_links[svm_id].status;
-            }
-            pthread_mutex_unlock(&uvm_links_mutex);
-
-
-            if (status_for_processing != UVM_LINK_ACTIVE && status_for_processing != UVM_LINK_WARNING) {
-                printf("UVM Main: Ignored message type %u from non-active/failed SVM ID %d (Status: %d)\n",
-                       msg->header.message_type, svm_id, status_for_processing);
-            } else {
-                printf("UVM Main: Processing message type %u from SVM ID %d (Assigned LAK 0x%02X, Num %u)\n",
-                       msg->header.message_type, svm_id, expected_lak_for_log, msg_num);
-
-                snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
-                         svm_id, msg->header.message_type, msg_num, msg->header.address,
-                         bcb_was_in_message ? bcb_field_for_gui : "",
-                         details_for_gui);
-                send_to_gui_socket(gui_msg_buffer);
-
-                // --- Отправка специфичных EVENT'ов в GUI (после основного RECV) ---
-                pthread_mutex_lock(&uvm_links_mutex); // Снова берем мьютекс для чтения флагов
-                if (svm_id >= 0 && svm_id < MAX_SVM_INSTANCES) {
-                    UvmSvmLink *link = &svm_links[svm_id]; // Получаем актуальный link
-                    if (link->lak_mismatch_detected) {
-                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                                  "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X",
-                                  svm_id, link->assigned_lak, ((ConfirmInitBody*)msg->body)->lak ); // LAK из тела ConfirmInit
-                         send_to_gui_socket(gui_msg_buffer);
-                         // Можно сбросить флаг после отправки, если событие одноразовое
-                         // link->lak_mismatch_detected = false;
-                         // Также отправляем обновление статуса, если он стал FAILED
-                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                                  "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
-                                  svm_id, link->status, link->assigned_lak);
-                         send_to_gui_socket(gui_msg_buffer);
-                    }
-                    if (link->control_failure_detected) {
-                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                                  "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X",
-                                  svm_id, link->last_control_rsk);
-                         send_to_gui_socket(gui_msg_buffer);
-                         // link->control_failure_detected = false; // Сбросить?
-                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                                  "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
-                                  svm_id, link->status, link->assigned_lak);
-                         send_to_gui_socket(gui_msg_buffer);
-                    }
-                    if (link->last_warning_tks != 0 && (time(NULL) - link->last_warning_time < 2)) { // Отправляем только свежее предупреждение
-                         snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                                  "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u",
-                                  svm_id, link->last_warning_tks);
-                         send_to_gui_socket(gui_msg_buffer);
-                         // link->last_warning_tks = 0; // Сбросить?
-                    }
-                }
-                pthread_mutex_unlock(&uvm_links_mutex);
-                // --- Конец отправки EVENT'ов ---
-            } // end if (status_for_processing == UVM_LINK_ACTIVE || WARNING)
-
-        } else { // Очередь пуста или закрыта
-            if (!uvm_keep_running) { break; }
-        }
-
-// --- Периодическая проверка Keep-Alive ---
-        time_t now_keepalive = time(NULL);
-        const time_t keepalive_timeout_sec = 15; // <-- УМЕНЬШИЛ ДЛЯ БЫСТРОГО ТЕСТА
-
-        for (int k = 0; k < num_svms_in_config; ++k) {
-             bool send_ka_event_flag = false; // Используем другое имя, чтобы не конфликтовать, если send_ka_event есть выше
-             UvmLinkStatus current_link_status_for_ka = UVM_LINK_INACTIVE;
-             LogicalAddress current_ka_lak_for_event = 0;
-             bool timeout_triggered_now = false; // Флаг, что таймаут сработал именно на этой итерации
-
-             pthread_mutex_lock(&uvm_links_mutex);
-             if (k >= 0 && k < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES, как определено в config.h
-                UvmSvmLink *link = &svm_links[k];
-                current_link_status_for_ka = link->status; // Сохраняем для использования после unlock
-                current_ka_lak_for_event = link->assigned_lak;
-
-                // --- ДОБАВЛЕН ОТЛАДОЧНЫЙ PRINTF ---
-                if (link->status == UVM_LINK_ACTIVE) { // Логируем только для активных, чтобы не засорять вывод
-                    long time_diff = (link->last_activity_time == 0) ? -1 : (now_keepalive - link->last_activity_time);
-                    printf("DEBUG KeepAlive Check SVM %d: Status=%d, LastActivity=%ld (Diff: %ld sec), TimeoutAfter=%ld sec\n",
-                           k, link->status, link->last_activity_time, time_diff, keepalive_timeout_sec);
-                }
-                // --- КОНЕЦ ОТЛАДОЧНОГО PRINTF ---
-
-                if (link->status == UVM_LINK_ACTIVE && link->last_activity_time != 0 &&
-                    (now_keepalive - link->last_activity_time) > keepalive_timeout_sec)
-                {
-                     fprintf(stderr, "UVM Main: Keep-Alive TIMEOUT detected for SVM ID %d! (Last activity %ld s ago)\n",
-                             k, (now_keepalive - link->last_activity_time));
-                     link->status = UVM_LINK_FAILED;
-                     link->timeout_detected = true; // Флаг, что таймаут был для этого линка
-                     if (link->connection_handle >= 0) {
-                          shutdown(link->connection_handle, SHUT_RDWR);
-                     }
-                     timeout_triggered_now = true; // Таймаут сработал именно сейчас
-                }
-             }
-             pthread_mutex_unlock(&uvm_links_mutex);
-
-             // Отправляем события, если таймаут сработал именно сейчас
-             if(timeout_triggered_now){
-                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity for %ld sec", k, keepalive_timeout_sec);
-                 send_to_gui_socket(gui_msg_buffer);
-                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", k, UVM_LINK_FAILED, current_ka_lak_for_event);
-                 send_to_gui_socket(gui_msg_buffer);
-                 // Флаг link->timeout_detected остается true, чтобы GUI мог это отображать,
-                 // пока соединение не будет восстановлено (если будет реконнект) или UVM не завершится.
-             }
-        } // end for keep-alive check
-
-        if (!message_received_in_this_iteration && uvm_keep_running) {
-            usleep(100000); // 100 мс
+        // Если ничего не произошло на этой итерации, небольшая пауза
+        if (!processed_something_this_iteration && uvm_keep_running) {
+            usleep(20000); // 20 мс
         }
     } // end while (uvm_keep_running)
 
-cleanup_connections:
-    printf("UVM: Завершение работы и очистка ресурсов...\n");
-    // Закрываем соединения и уничтожаем интерфейсы
+
+    // --- Отправка команд "Подготовка к сеансу съемки" ---
+    printf("\nUVM: Этап 'Подготовка к сеансу наблюдения' завершен для всех SVM (или помечены как FAILED).\n");
+    printf("--- Подготовка к сеансу съемки (для успешно подготовленных SVM) ---\n");
     pthread_mutex_lock(&uvm_links_mutex);
-	uvm_keep_running = false; // Устанавливаем флаг для всех потоков
-    for (int i = 0; i < MAX_SVM_INSTANCES; ++i) { // Проверяем все слоты
+    for (int i = 0; i < num_svms_in_config; ++i) {
+        if (!config.svm_config_loaded[i]) continue;
+        UvmSvmLink *link_shoot_final = &svm_links[i];
+
+        if (link_shoot_final->prep_state == PREP_STATE_PREPARATION_COMPLETE &&
+            (link_shoot_final->status == UVM_LINK_ACTIVE || link_shoot_final->status == UVM_LINK_WARNING)) {
+            
+            printf("UVM Main (SVM %d): Отправка параметров съемки (Режим: %d, LAK: 0x%02X)...\n",
+                   i, mode, link_shoot_final->assigned_lak);
+            UvmRequest request_shoot_final;
+            request_shoot_final.type = UVM_REQ_SEND_MESSAGE;
+            request_shoot_final.target_svm_id = i;
+            // Используем link_shoot_final->current_preparation_msg_num, так как он содержит следующий свободный номер
+            uint16_t shoot_msg_num_start = link_shoot_final->current_preparation_msg_num;
+
+            if (mode == MODE_DR) {
+                 request_shoot_final.message = create_prinyat_parametry_sdr_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametrySdrBodyBase sdr_b_f = {0}; sdr_b_f.pp_nl=(uint8_t)mode|i; /*...*/ memcpy(request_shoot_final.message.body, &sdr_b_f, sizeof(sdr_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(sdr_b_f)); send_uvm_request(&request_shoot_final);
+
+                 request_shoot_final.message = create_prinyat_parametry_tsd_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametryTsdBodyBase tsd_b_f = {0}; /*...*/ memcpy(request_shoot_final.message.body, &tsd_b_f, sizeof(tsd_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(tsd_b_f)); send_uvm_request(&request_shoot_final);
+            } else if (mode == MODE_OR || mode == MODE_OR1) {
+                 request_shoot_final.message = create_prinyat_parametry_so_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametrySoBody so_b_f = {0}; so_b_f.pp=mode; /*...*/ memcpy(request_shoot_final.message.body, &so_b_f, sizeof(so_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(so_b_f)); send_uvm_request(&request_shoot_final);
+
+                 request_shoot_final.message = create_prinyat_parametry_3tso_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametry3TsoBody tso_b_f = {0}; /*...*/ memcpy(request_shoot_final.message.body, &tso_b_f, sizeof(tso_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(tso_b_f)); send_uvm_request(&request_shoot_final);
+                
+                 request_shoot_final.message = create_prinyat_time_ref_range_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatTimeRefRangeBody trr_b_f = {0}; memcpy(request_shoot_final.message.body, &trr_b_f, sizeof(trr_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(trr_b_f)); send_uvm_request(&request_shoot_final);
+
+                 request_shoot_final.message = create_prinyat_reper_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatReperBody rep_b_f = {0}; memcpy(request_shoot_final.message.body, &rep_b_f, sizeof(rep_b_f));
+                 request_shoot_final.message.header.body_length = htons(sizeof(rep_b_f)); send_uvm_request(&request_shoot_final);
+            } else if (mode == MODE_VR) {
+                 request_shoot_final.message = create_prinyat_parametry_so_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametrySoBody so_b_f_vr = {0}; so_b_f_vr.pp=mode; memcpy(request_shoot_final.message.body, &so_b_f_vr, sizeof(so_b_f_vr));
+                 request_shoot_final.message.header.body_length = htons(sizeof(so_b_f_vr)); send_uvm_request(&request_shoot_final);
+
+                 request_shoot_final.message = create_prinyat_parametry_3tso_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+                 PrinyatParametry3TsoBody tso_b_f_vr = {0}; memcpy(request_shoot_final.message.body, &tso_b_f_vr, sizeof(tso_b_f_vr));
+                 request_shoot_final.message.header.body_length = htons(sizeof(tso_b_f_vr)); send_uvm_request(&request_shoot_final);
+            }
+            request_shoot_final.message = create_navigatsionnye_dannye_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
+            NavigatsionnyeDannyeBody nav_b_f = {0}; memcpy(request_shoot_final.message.body, &nav_b_f, sizeof(nav_b_f));
+            request_shoot_final.message.header.body_length = htons(sizeof(nav_b_f)); send_uvm_request(&request_shoot_final);
+            
+            link_shoot_final->current_preparation_msg_num = shoot_msg_num_start; // Сохраняем следующий свободный номер
+        } else {
+            printf("UVM Main (SVM %d): Пропуск отправки параметров съемки (статус TCP: %d, состояние подготовки: %d).\n",
+                   i, link_shoot_final->status, link_shoot_final->prep_state);
+        }
+    }
+    pthread_mutex_unlock(&uvm_links_mutex);
+    wait_for_outstanding_sends();
+    printf("UVM: Все сообщения подготовки к съемке отправлены (или пропущены).\n");
+
+    printf("UVM: Ожидание асинхронных сообщений от SVM или Ctrl+C для завершения работы...\n");
+    while(uvm_keep_running) {
+        // Этот цикл теперь в основном для обработки асинхронных сообщений от SVM (СУБК, КО и т.д.)
+        // и для Keep-Alive.
+        if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data_main)) {
+            // ... (Обработка асинхронных сообщений: просто логируем и отправляем в GUI)
+            int svm_id_async = response_msg_data_main.source_svm_id;
+            Message *msg_async = &response_msg_data_main.message;
+            message_to_host_byte_order(msg_async);
+            uint16_t msg_num_async = get_full_message_number(&msg_async->header);
+            printf("UVM Main (SVM %d): Получено асинхронное сообщение тип %u, номер %u.\n",
+                   svm_id_async, msg_async->header.message_type, msg_num_async);
+            
+            char gui_details_async[256] = "Async Data"; // Общее описание
+            char gui_bcb_field_async[32] = "";
+            bool bcb_found_async = false;
+            // (Можно добавить извлечение BCB, если он есть в этих асинхронных сообщениях)
+
+            snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
+                     "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
+                     svm_id_async, msg_async->header.message_type, msg_num_async,
+                     msg_async->header.address,
+                     bcb_found_async ? gui_bcb_field_async : "", gui_details_async);
+            send_to_gui_socket(gui_buffer_main_loop);
+
+            // Обновляем last_activity_time
+            pthread_mutex_lock(&uvm_links_mutex);
+            if (svm_id_async >=0 && svm_id_async < num_svms_in_config) {
+                 svm_links[svm_id_async].last_activity_time = time(NULL);
+            }
+            pthread_mutex_unlock(&uvm_links_mutex);
+
+        } else {
+            if (!uvm_keep_running) break; // Выходим, если пришел сигнал завершения
+             // Проверяем Keep-Alive, если очередь пуста
+            time_t now_final_ka_check = time(NULL);
+            bool ka_processed_something = false;
+            pthread_mutex_lock(&uvm_links_mutex);
+            for (int ka_final_idx = 0; ka_final_idx < num_svms_in_config; ++ka_final_idx) {
+                if (!config.svm_config_loaded[ka_final_idx]) continue;
+                UvmSvmLink *link_ka_final = &svm_links[ka_final_idx];
+                if (link_ka_final->status == UVM_LINK_ACTIVE &&
+                    link_ka_final->last_activity_time > 0 &&
+                    (now_final_ka_check - link_ka_final->last_activity_time) > KEEP_ALIVE_TIMEOUT_SEC_MAIN) {
+                    // ... (логика обработки Keep-Alive таймаута как в БЛОКЕ 4 выше) ...
+                    // ... (установка FAILED, отправка EVENT'ов в GUI) ...
+                    ka_processed_something = true;
+                }
+            }
+            pthread_mutex_unlock(&uvm_links_mutex);
+            if(!ka_processed_something && uvm_keep_running) { // Если и KA ничего не сделал
+                usleep(100000); // 100 мс
+            }
+        }
+    } // end final while (uvm_keep_running)
+
+
+cleanup_connections: // Метка для goto при ошибках на ранних этапах
+    printf("UVM: Завершение работы и очистка ресурсов...\n");
+    uvm_keep_running = false; // Устанавливаем флаг для всех потоков, если еще не установлен
+
+    // Сигналим очередям, чтобы потоки sender/receiver могли завершиться, если ждут
+    if (uvm_outgoing_request_queue) queue_req_shutdown(uvm_outgoing_request_queue);
+    if (uvm_incoming_response_queue) uvq_shutdown(uvm_incoming_response_queue);
+
+    // Ожидаем завершения потока Sender
+    if (sender_tid != 0) {
+        pthread_join(sender_tid, NULL);
+        printf("UVM: Sender thread joined.\n");
+    }
+
+    // Ожидаем завершения потоков Receiver'ов
+    pthread_mutex_lock(&uvm_links_mutex); // Блокируем для безопасного доступа к svm_links
+    for (int i = 0; i < num_svms_in_config; ++i) {
+        if (svm_links[i].receiver_tid != 0) {
+            // Receiver должен сам завершиться, если uvm_keep_running=false или его сокет закрыт
+            pthread_join(svm_links[i].receiver_tid, NULL);
+            printf("UVM: Receiver thread for SVM ID %d joined.\n", i);
+            svm_links[i].receiver_tid = 0;
+        }
+        // Закрываем соединения и уничтожаем интерфейсы (если еще не сделано)
         if (svm_links[i].io_handle) {
             if (svm_links[i].connection_handle >= 0) {
                 svm_links[i].io_handle->disconnect(svm_links[i].io_handle, svm_links[i].connection_handle);
-                // printf("UVM: Connection for SVM ID %d closed.\n", i); // Уже не нужно, т.к. Receiver завершился
             }
             svm_links[i].io_handle->destroy(svm_links[i].io_handle);
-             // printf("UVM: IO Interface for SVM ID %d destroyed.\n", i);
             svm_links[i].io_handle = NULL;
             svm_links[i].connection_handle = -1;
             svm_links[i].status = UVM_LINK_INACTIVE;
-            svm_links[i].receiver_tid = 0; // Сбрасываем ID потока
         }
     }
     pthread_mutex_unlock(&uvm_links_mutex);
 
+    // Завершаем поток GUI сервера
+    if (gui_server_tid != 0) {
+        // Закрываем слушающий сокет GUI, чтобы accept вышел
+        pthread_mutex_lock(&gui_socket_mutex);
+        if (gui_listen_fd >= 0) { close(gui_listen_fd); gui_listen_fd = -1; }
+        if (gui_client_fd >= 0) { shutdown(gui_client_fd, SHUT_RDWR); /*close(gui_client_fd);*/ gui_client_fd = -1; } // Разбудить, если он спит
+        pthread_mutex_unlock(&gui_socket_mutex);
+        pthread_join(gui_server_tid, NULL);
+        printf("UVM: GUI server thread joined.\n");
+    }
+
 cleanup_queues:
-    // Уничтожаем очереди
+    if (uvm_outgoing_request_queue && uvm_outgoing_request_queue->shutdown == false) queue_req_shutdown(uvm_outgoing_request_queue); // На всякий случай
+    if (uvm_incoming_response_queue && uvm_incoming_response_queue->shutdown == false) uvq_shutdown(uvm_incoming_response_queue); // На всякий случай
     if (uvm_outgoing_request_queue) queue_req_destroy(uvm_outgoing_request_queue);
     if (uvm_incoming_response_queue) uvq_destroy(uvm_incoming_response_queue);
 
-    // Уничтожаем мьютексы и условие
+// cleanup_sync: // Метка не используется, т.к. инициализация мьютексов происходит раньше
     pthread_mutex_destroy(&uvm_links_mutex);
     pthread_mutex_destroy(&uvm_send_counter_mutex);
     pthread_cond_destroy(&uvm_all_sent_cond);
-	pthread_mutex_destroy(&gui_socket_mutex); // <-- Уничтожаем мьютекс GUI
+    pthread_mutex_destroy(&gui_socket_mutex);
 
-    printf("UVM: Очистка завершена.\n");
+    printf("UVM: Очистка завершена. Программа штатно завершает работу.\n");
     return 0;
-}
+} // конец main
