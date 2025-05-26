@@ -67,7 +67,7 @@ void* uvm_sender_thread_func(void* arg) {
 				if (send_protocol_message(io, handle, &request.message) != 0) {
 					fprintf(stderr, "UVM Sender: ОШИБКА ФИЗИЧЕСКОЙ отправки сообщения тип %u SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
 				} else {
-					printf("UVM Sender: Сообщение тип %u УСПЕШНО ФИЗИЧЕСКИ отправлено SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
+					//printf("UVM Sender: Сообщение тип %u УСПЕШНО ФИЗИЧЕСКИ отправлено SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
 				}
 			} else if (is_active) {
 				 fprintf(stderr, "UVM Sender: SVM %d активен, но io/handle невалидны. Пропуск отправки.\n", svm_id); // <-- ОТЛАДКА

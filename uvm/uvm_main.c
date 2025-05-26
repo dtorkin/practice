@@ -188,7 +188,7 @@ bool send_uvm_request(UvmRequest *request) {
         if (request->type == UVM_REQ_SEND_MESSAGE) { // Только если мы его увеличивали
              pthread_mutex_lock(&uvm_send_counter_mutex);
              if(uvm_outstanding_sends > 0) uvm_outstanding_sends--;
-             printf("send_uvm_request: uvm_outstanding_sends уменьшен (ошибка enqueue) до %d.\n", uvm_outstanding_sends);
+             //printf("send_uvm_request: uvm_outstanding_sends уменьшен (ошибка enqueue) до %d.\n", uvm_outstanding_sends);
              pthread_mutex_unlock(&uvm_send_counter_mutex);
         }
         return false;
