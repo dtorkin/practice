@@ -88,8 +88,11 @@ int receive_protocol_message(IOInterface *io, int handle, Message *message) {
     memcpy(&message->header, &header_net, sizeof(MessageHeader));
 
     // Этап 2: Преобразование длины и чтение тела
-    uint16_t bodyLenNet = message->header.body_length;
-    uint16_t bodyLenHost = ntohs(bodyLenNet); // Теперь ntohs известен
+	printf("DEBUG RECV: header_net.body_length (network order) = 0x%04X (%u)\n", header_net.body_length, header_net.body_length);
+	memcpy(&message->header, &header_net, sizeof(MessageHeader));
+	uint16_t bodyLenNet = message->header.body_length;
+	uint16_t bodyLenHost = ntohs(bodyLenNet);
+	printf("DEBUG RECV: bodyLenHost (host order) = %u\n", bodyLenHost);
 
     if (bodyLenHost > MAX_MESSAGE_BODY_SIZE) {
         fprintf(stderr, "receive_protocol_message: Ошибка: Полученная длина тела (%u) > MAX (%d).\n", bodyLenHost, MAX_MESSAGE_BODY_SIZE);
@@ -117,8 +120,9 @@ int receive_protocol_message(IOInterface *io, int handle, Message *message) {
     }
 
     // Этап 3: Преобразование всего сообщения в хост-порядок
-    message->header.body_length = bodyLenNet; // Восстанавливаем для message_to_host_byte_order
-    message_to_host_byte_order(message);
+	message->header.body_length = bodyLenNet; // ВОССТАНАВЛИВАЕМ СЕТЕВОЙ ПОРЯДОК ДЛЯ body_length
+	message_to_host_byte_order(message); // Теперь эта функция получит body_length в сетевом порядке
+	printf("DEBUG RECV: message.header.body_length после message_to_host_byte_order (должен быть хост) = %u\n", message->header.body_length);
 
     printf("Получено сообщение через %s: Тип=%u, Номер=%u, Длина тела=%u, Handle=%d\n",
            (io->type == IO_TYPE_ETHERNET) ? "Ethernet" : ((io->type == IO_TYPE_SERIAL) ? "Serial" : "Unknown"),

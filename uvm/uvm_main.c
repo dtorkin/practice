@@ -146,6 +146,9 @@ bool send_uvm_request(UvmRequest *request) {
                 message_to_host_byte_order(&temp_msg_for_weight); // Гарантируем хостовый порядок для body_length
                 uint16_t body_len_sent_host = temp_msg_for_weight.header.body_length;
                 size_t weight_sent = sizeof(MessageHeader) + body_len_sent_host;
+				printf("DEBUG SENT Type 160: body_len_sent_host = %u, sizeof(PrinyatParametrySoBody) = %zu, calculated_weight = %zu\n",
+				body_len_sent_host, sizeof(PrinyatParametrySoBody), weight_sent);
+
                 // --- КОНЕЦ---
 
 
