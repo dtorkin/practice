@@ -95,7 +95,7 @@ void initialize_svm_instance(SvmInstance *instance, int id, LogicalAddress lak_f
     instance->link_up_changes_counter = 0;
     instance->link_up_low_time_us100 = 0;
     instance->sign_det_changes_counter = 0;
-    instance->link_status_timer_counter_interval = 0; // Переименованное поле
+    instance->link_status_timer_counter = 0; // Переименованное поле
 
     instance->assigned_lak = lak_from_config;
 	instance->user_flag1 = false;
@@ -179,7 +179,7 @@ void* listener_thread_func(void* arg) {
         instance->link_up_changes_counter = 0;
         instance->link_up_low_time_us100 = 0;
         instance->sign_det_changes_counter = 0;
-        instance->link_status_timer_counter_interval = 0;
+        instance->link_status_timer_counter = 0;
         instance->user_flag1 = false; // Сброс флагов имитации
 
         instance->incoming_queue = qmq_create(100);
@@ -243,8 +243,7 @@ void* listener_thread_func(void* arg) {
              pthread_mutex_lock(&instance->instance_mutex);
              if (instance->client_handle >= 0) {
                  if (instance->io_handle) instance->io_handle->disconnect(instance->io_handle, instance->client_handle);
-                 else close(instance->client_handle);
-                 instance->client_handle = -1;
+                 else { close(instance->client_handle); instance->client_handle = -1; }
              }
              if (instance->incoming_queue) { qmq_destroy(instance->incoming_queue); instance->incoming_queue = NULL; }
              instance->is_active = false;
@@ -256,7 +255,7 @@ void* listener_thread_func(void* arg) {
             pthread_mutex_unlock(&instance->instance_mutex);
             fprintf(stderr, "Listener (SVM %d, Port %u): Failed to start all worker threads. Rejecting.\n", svm_id, port);
             if(instance->incoming_queue) { qmq_destroy(instance->incoming_queue); instance->incoming_queue = NULL; }
-            if(instance->client_handle >=0) close(instance->client_handle); instance->client_handle = -1;
+            if(instance->client_handle >=0) { close(instance->client_handle); instance->client_handle = -1;}
             instance->io_handle = NULL; // Указатель на listener_io не должен быть NULL здесь, т.к. он общий для листенера
         }
     } // end while(keep_running)

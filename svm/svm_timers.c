@@ -54,9 +54,9 @@ void* svm_instance_timer_thread_func(void* arg) {
         }
 
         // Обновление счетчиков линии (KLA, SLA, KSA)
-        instance->link_status_timer_counter_interval++;
-        if (instance->link_status_timer_counter_interval >= (TIMER_INTERVAL_LINK_STATUS_MS / TIMER_INTERVAL_BCB_MS)) {
-            instance->link_status_timer_counter_interval = 0; // Сброс
+		instance->link_status_timer_counter++;
+		if (instance->link_status_timer_counter >= (TIMER_INTERVAL_LINK_STATUS_MS / TIMER_INTERVAL_BCB_MS)) {
+			instance->link_status_timer_counter = 0; // Сброс
 
             if (rand() % LINK_CHANGE_PROBABILITY == 0) {
                 if (instance->link_up_changes_counter < UINT16_MAX) {
