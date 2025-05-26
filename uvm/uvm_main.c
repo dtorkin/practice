@@ -626,73 +626,131 @@ int main(int argc, char *argv[]) {
     while (uvm_keep_running) {
         bool processed_something_this_iteration = false; // Флаг, что на этой итерации что-то сделали
 
-// === БЛОК 1: ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
-pthread_mutex_lock(&uvm_links_mutex);
-for (int i = 0; i < num_svms_in_config; ++i) {
-    if (!config.svm_config_loaded[i]) continue;
-    UvmSvmLink *link = &svm_links[i];
-    bool command_to_send_prepared_now = false;
-    UvmRequest request_to_send;
-    request_to_send.type = UVM_REQ_SEND_MESSAGE;
-    request_to_send.target_svm_id = i;
-    MessageType temp_sent_cmd_type = (MessageType)0;
+        pthread_mutex_lock(&uvm_links_mutex);
+        for (int i = 0; i < num_svms_in_config; ++i) {
+            if (!config.svm_config_loaded[i]) continue;
+            UvmSvmLink *link = &svm_links[i];
+            bool command_to_send_prepared_now = false;
+            UvmRequest request_to_send;
+            request_to_send.type = UVM_REQ_SEND_MESSAGE;
+            request_to_send.target_svm_id = i;
+            // MessageType temp_sent_cmd_type = (MessageType)0; // Используем link->last_sent_prep_cmd_type
 
-    if (link->status == UVM_LINK_ACTIVE && link->prep_state != PREP_STATE_PREPARATION_COMPLETE && link->prep_state != PREP_STATE_FAILED) {
-        switch (link->prep_state) {
-            case PREP_STATE_READY_TO_SEND_INIT_CHANNEL:
-                request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
-                InitChannelBody *init_b_s = (InitChannelBody*)request_to_send.message.body; init_b_s->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_s->lak = link->assigned_lak;
-                temp_sent_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
-                command_to_send_prepared_now = true;
-                break;
-            case PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL:
-                request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
-                ProvestiKontrolBody* pk_b_s = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_s->tk = 0x01; request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-                temp_sent_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
-                command_to_send_prepared_now = true;
-                break;
-            case PREP_STATE_READY_TO_SEND_VYDAT_REZ:
-                request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
-                VydatRezultatyKontrolyaBody* vrk_b_s = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_s->vrk = 0x0F; request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-                temp_sent_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
-                command_to_send_prepared_now = true;
-                break;
-            case PREP_STATE_READY_TO_SEND_VYDAT_SOST:
-                request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
-                temp_sent_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
-                command_to_send_prepared_now = true;
-                break;
-            default: // В состояниях AWAITING_..._REPLY ничего не отправляем из этого блока
-                break;
-        }
+            if (link->status == UVM_LINK_ACTIVE || link->status == UVM_LINK_WARNING) { // Работаем также если статус WARNING (например, после ControlFail)
+                
+                switch (link->prep_state) {
+                    // --- Кейсы для этапа "Подготовка к сеансу наблюдения" (как были) ---
+                    case PREP_STATE_READY_TO_SEND_INIT_CHANNEL:
+                        request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
+                        InitChannelBody *init_b_s1 = (InitChannelBody*)request_to_send.message.body; init_b_s1->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_s1->lak = link->assigned_lak;
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_INIT_CHANNEL; // Сохраняем тип отправляемой команды
+                        command_to_send_prepared_now = true;
+                        // printf("UVM Main (SVM %d): Команда 'Инициализация канала' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
+                        break;
+                    case PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL:
+                        request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
+                        ProvestiKontrolBody* pk_b_s1 = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_s1->tk = 0x01; request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
+                        command_to_send_prepared_now = true;
+                        break;
+                    case PREP_STATE_READY_TO_SEND_VYDAT_REZ:
+                        request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
+                        VydatRezultatyKontrolyaBody* vrk_b_s1 = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_s1->vrk = 0x0F; request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                        command_to_send_prepared_now = true;
+                        break;
+                    case PREP_STATE_READY_TO_SEND_VYDAT_SOST:
+                        request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
+                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                        command_to_send_prepared_now = true;
+                        break;
 
-        if (command_to_send_prepared_now) {
-            printf("UVM Main (SVM %d): Отправка команды типа %u (Num %u)...\n", i, temp_sent_cmd_type, link->current_preparation_msg_num);
-            if (send_uvm_request(&request_to_send)) {
-                temp_sent_cmd_type = temp_sent_cmd_type; // <--- Используем temp_sent_cmd_type
-                link->last_command_sent_time = time(NULL);
-                // Переводим в соответствующее состояние ОЖИДАНИЯ ОТВЕТА
-                if (temp_sent_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
-                    link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT_REPLY;
-                } else if (temp_sent_cmd_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
-                    link->prep_state = PREP_STATE_AWAITING_PODTV_KONTROL_REPLY;
-                } else if (temp_sent_cmd_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
-                    link->prep_state = PREP_STATE_AWAITING_REZ_KONTROL_REPLY;
-                } else if (temp_sent_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
-                    link->prep_state = PREP_STATE_AWAITING_LINE_STATUS_REPLY;
+                    // --- НОВЫЙ КЕЙС: ПОДГОТОВКА ЗАВЕРШЕНА, ОТПРАВЛЯЕМ ПАРАМЕТРЫ СЪЕМКИ ---
+                    case PREP_STATE_PREPARATION_COMPLETE:
+                        printf("UVM Main (SVM %d): Подготовка завершена. Отправка параметров съемки (Режим: %d, LAK: 0x%02X)...\n",
+                               i, mode, link->assigned_lak);
+                        
+                        // Отправляем "пачку" команд подготовки к съемке.
+                        // Они не требуют ответа, поэтому отправляем все сразу.
+                        // Используем link->current_preparation_msg_num как стартовый номер для этой пачки.
+                        uint16_t shoot_params_msg_num_start = link->current_preparation_msg_num;
+
+                        if (mode == MODE_DR) {
+                             request_to_send.message = create_prinyat_parametry_sdr_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametrySdrBodyBase sdr_b_f1 = {0}; sdr_b_f1.pp_nl=(uint8_t)mode|(i & 0x03); /* Убедитесь, что i здесь корректно для номера луча */ memcpy(request_to_send.message.body, &sdr_b_f1, sizeof(sdr_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(sdr_b_f1)); send_uvm_request(&request_to_send);
+
+                             request_to_send.message = create_prinyat_parametry_tsd_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametryTsdBodyBase tsd_b_f1 = {0}; memcpy(request_to_send.message.body, &tsd_b_f1, sizeof(tsd_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(tsd_b_f1)); send_uvm_request(&request_to_send);
+                        } else if (mode == MODE_OR || mode == MODE_OR1) {
+                             request_to_send.message = create_prinyat_parametry_so_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametrySoBody so_b_f1 = {0}; so_b_f1.pp=mode; memcpy(request_to_send.message.body, &so_b_f1, sizeof(so_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(so_b_f1)); send_uvm_request(&request_to_send);
+
+                             request_to_send.message = create_prinyat_parametry_3tso_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametry3TsoBody tso_b_f1 = {0}; memcpy(request_to_send.message.body, &tso_b_f1, sizeof(tso_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(tso_b_f1)); send_uvm_request(&request_to_send);
+                            
+                             request_to_send.message = create_prinyat_time_ref_range_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatTimeRefRangeBody trr_b_f1 = {0}; memcpy(request_to_send.message.body, &trr_b_f1, sizeof(trr_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(trr_b_f1)); send_uvm_request(&request_to_send);
+
+                             request_to_send.message = create_prinyat_reper_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatReperBody rep_b_f1 = {0}; memcpy(request_to_send.message.body, &rep_b_f1, sizeof(rep_b_f1));
+                             request_to_send.message.header.body_length = htons(sizeof(rep_b_f1)); send_uvm_request(&request_to_send);
+                        } else if (mode == MODE_VR) {
+                             request_to_send.message = create_prinyat_parametry_so_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametrySoBody so_b_f_vr1 = {0}; so_b_f_vr1.pp=mode; memcpy(request_to_send.message.body, &so_b_f_vr1, sizeof(so_b_f_vr1));
+                             request_to_send.message.header.body_length = htons(sizeof(so_b_f_vr1)); send_uvm_request(&request_to_send);
+
+                             request_to_send.message = create_prinyat_parametry_3tso_message(link->assigned_lak, shoot_params_msg_num_start++);
+                             PrinyatParametry3TsoBody tso_b_f_vr1 = {0}; memcpy(request_to_send.message.body, &tso_b_f_vr1, sizeof(tso_b_f_vr1));
+                             request_to_send.message.header.body_length = htons(sizeof(tso_b_f_vr1)); send_uvm_request(&request_to_send);
+                        }
+                        // Навигационные данные для всех режимов
+                        request_to_send.message = create_navigatsionnye_dannye_message(link->assigned_lak, shoot_params_msg_num_start++);
+                        NavigatsionnyeDannyeBody nav_b_f1 = {0}; memcpy(request_to_send.message.body, &nav_b_f1, sizeof(nav_b_f1)); // Заполните тело nav_b_f1, если нужно
+                        request_to_send.message.header.body_length = htons(sizeof(nav_b_f1)); 
+                        if(send_uvm_request(&request_to_send)) { // Проверяем результат последней отправки
+                           link->current_preparation_msg_num = shoot_params_msg_num_start; // Обновляем счетчик на следующий свободный
+                           // Переводим в новое состояние, например, "Ожидание начала съемки" или "Параметры съемки отправлены"
+                           // Пока просто оставим PREPARATION_COMPLETE, чтобы этот блок не срабатывал повторно.
+                           // TODO: Ввести новое состояние SHOOTING_PARAMS_SENT или аналогичное.
+                           printf("UVM Main (SVM %d): Параметры съемки отправлены. Состояние остается PREPARATION_COMPLETE (пока).\n", i);
+                        } else {
+                            // Ошибка отправки последнего сообщения из пачки
+                             link->prep_state = PREP_STATE_FAILED; link->status = UVM_LINK_FAILED;
+                        }
+                        command_to_send_prepared_now = false; // Мы уже отправили все, что нужно в этом case
+                        processed_something_this_iteration = true;
+                        break;
+
+                    default: // В состояниях AWAITING_..._REPLY или FAILED ничего не отправляем из этого блока
+                        break;
                 }
-                // НЕ инкрементируем current_preparation_msg_num здесь! Он инкрементируется при УСПЕШНОМ ПОЛУЧЕНИИ ответа.
-                printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
-                       i, temp_sent_cmd_type, link->current_preparation_msg_num, link->prep_state);
-                    } else {
-                        fprintf(stderr, "UVM Main (SVM %d): Ошибка постановки в очередь команды типа %u. Установка FAILED.\n", i, temp_sent_cmd_type); // ИЗМЕНЕНО
-                        link->prep_state = PREP_STATE_FAILED;
-                        link->status = UVM_LINK_FAILED;
-                        // ... (EVENT в GUI) ...
-                    }
-                    processed_something_this_iteration = true; // Пометили, что что-то сделали
-                } // if command_to_send_prepared_now
-            } // if link active and not complete/failed
+
+                // Этот блок if теперь только для команд ПОДГОТОВКИ К НАБЛЮДЕНИЮ
+                if (command_to_send_prepared_now && link->prep_state != PREP_STATE_PREPARATION_COMPLETE) {
+                    printf("UVM Main (SVM %d): Отправка команды подготовки типа %u (Num %u)...\n", i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num);
+                    if (send_uvm_request(&request_to_send)) {
+                        link->last_command_sent_time = time(NULL);
+                        // Переводим в соответствующее состояние ОЖИДАНИЯ ОТВЕТА
+                        if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
+                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT_REPLY;
+                        } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
+                            link->prep_state = PREP_STATE_AWAITING_PODTV_KONTROL_REPLY;
+                        } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
+                            link->prep_state = PREP_STATE_AWAITING_REZ_KONTROL_REPLY;
+                        } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+                            link->prep_state = PREP_STATE_AWAITING_LINE_STATUS_REPLY;
+                        }
+                        printf("UVM Main (SVM %d): Команда подготовки типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
+                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
+                    } else { /* ... обработка ошибки send_uvm_request для команд подготовки ... */ }
+                    processed_something_this_iteration = true;
+                }
+            } // if link active or warning
         } // for each svm
         pthread_mutex_unlock(&uvm_links_mutex);
 
@@ -986,129 +1044,6 @@ for (int i = 0; i < num_svms_in_config; ++i) {
             usleep(20000); // 20 мс
         }
     } // end while (uvm_keep_running)
-
-
-    // --- Отправка команд "Подготовка к сеансу съемки" ---
-    printf("\nUVM: Этап 'Подготовка к сеансу наблюдения' завершен для всех SVM (или помечены как FAILED).\n");
-    printf("--- Подготовка к сеансу съемки (для успешно подготовленных SVM) ---\n");
-    pthread_mutex_lock(&uvm_links_mutex);
-    for (int i = 0; i < num_svms_in_config; ++i) {
-        if (!config.svm_config_loaded[i]) continue;
-        UvmSvmLink *link_shoot_final = &svm_links[i];
-
-        if (link_shoot_final->prep_state == PREP_STATE_PREPARATION_COMPLETE &&
-            (link_shoot_final->status == UVM_LINK_ACTIVE || link_shoot_final->status == UVM_LINK_WARNING)) {
-            
-            printf("UVM Main (SVM %d): Отправка параметров съемки (Режим: %d, LAK: 0x%02X)...\n",
-                   i, mode, link_shoot_final->assigned_lak);
-            UvmRequest request_shoot_final;
-            request_shoot_final.type = UVM_REQ_SEND_MESSAGE;
-            request_shoot_final.target_svm_id = i;
-            // Используем link_shoot_final->current_preparation_msg_num, так как он содержит следующий свободный номер
-            uint16_t shoot_msg_num_start = link_shoot_final->current_preparation_msg_num;
-
-            if (mode == MODE_DR) {
-                 request_shoot_final.message = create_prinyat_parametry_sdr_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametrySdrBodyBase sdr_b_f = {0}; sdr_b_f.pp_nl=(uint8_t)mode|i; /*...*/ memcpy(request_shoot_final.message.body, &sdr_b_f, sizeof(sdr_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(sdr_b_f)); send_uvm_request(&request_shoot_final);
-
-                 request_shoot_final.message = create_prinyat_parametry_tsd_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametryTsdBodyBase tsd_b_f = {0}; /*...*/ memcpy(request_shoot_final.message.body, &tsd_b_f, sizeof(tsd_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(tsd_b_f)); send_uvm_request(&request_shoot_final);
-            } else if (mode == MODE_OR || mode == MODE_OR1) {
-                 request_shoot_final.message = create_prinyat_parametry_so_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametrySoBody so_b_f = {0}; so_b_f.pp=mode; /*...*/ memcpy(request_shoot_final.message.body, &so_b_f, sizeof(so_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(so_b_f)); send_uvm_request(&request_shoot_final);
-
-                 request_shoot_final.message = create_prinyat_parametry_3tso_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametry3TsoBody tso_b_f = {0}; /*...*/ memcpy(request_shoot_final.message.body, &tso_b_f, sizeof(tso_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(tso_b_f)); send_uvm_request(&request_shoot_final);
-                
-                 request_shoot_final.message = create_prinyat_time_ref_range_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatTimeRefRangeBody trr_b_f = {0}; memcpy(request_shoot_final.message.body, &trr_b_f, sizeof(trr_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(trr_b_f)); send_uvm_request(&request_shoot_final);
-
-                 request_shoot_final.message = create_prinyat_reper_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatReperBody rep_b_f = {0}; memcpy(request_shoot_final.message.body, &rep_b_f, sizeof(rep_b_f));
-                 request_shoot_final.message.header.body_length = htons(sizeof(rep_b_f)); send_uvm_request(&request_shoot_final);
-            } else if (mode == MODE_VR) {
-                 request_shoot_final.message = create_prinyat_parametry_so_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametrySoBody so_b_f_vr = {0}; so_b_f_vr.pp=mode; memcpy(request_shoot_final.message.body, &so_b_f_vr, sizeof(so_b_f_vr));
-                 request_shoot_final.message.header.body_length = htons(sizeof(so_b_f_vr)); send_uvm_request(&request_shoot_final);
-
-                 request_shoot_final.message = create_prinyat_parametry_3tso_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-                 PrinyatParametry3TsoBody tso_b_f_vr = {0}; memcpy(request_shoot_final.message.body, &tso_b_f_vr, sizeof(tso_b_f_vr));
-                 request_shoot_final.message.header.body_length = htons(sizeof(tso_b_f_vr)); send_uvm_request(&request_shoot_final);
-            }
-            request_shoot_final.message = create_navigatsionnye_dannye_message(link_shoot_final->assigned_lak, shoot_msg_num_start++);
-            NavigatsionnyeDannyeBody nav_b_f = {0}; memcpy(request_shoot_final.message.body, &nav_b_f, sizeof(nav_b_f));
-            request_shoot_final.message.header.body_length = htons(sizeof(nav_b_f)); send_uvm_request(&request_shoot_final);
-            
-            link_shoot_final->current_preparation_msg_num = shoot_msg_num_start; // Сохраняем следующий свободный номер
-        } else {
-            printf("UVM Main (SVM %d): Пропуск отправки параметров съемки (статус TCP: %d, состояние подготовки: %d).\n",
-                   i, link_shoot_final->status, link_shoot_final->prep_state);
-        }
-    }
-    pthread_mutex_unlock(&uvm_links_mutex);
-    wait_for_outstanding_sends();
-    printf("UVM: Все сообщения подготовки к съемке отправлены (или пропущены).\n");
-
-    printf("UVM: Ожидание асинхронных сообщений от SVM или Ctrl+C для завершения работы...\n");
-    while(uvm_keep_running) {
-        // Этот цикл теперь в основном для обработки асинхронных сообщений от SVM (СУБК, КО и т.д.)
-        // и для Keep-Alive.
-        if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data_main)) {
-            // ... (Обработка асинхронных сообщений: просто логируем и отправляем в GUI)
-            int svm_id_async = response_msg_data_main.source_svm_id;
-            Message *msg_async = &response_msg_data_main.message;
-            message_to_host_byte_order(msg_async);
-            uint16_t msg_num_async = get_full_message_number(&msg_async->header);
-            printf("UVM Main (SVM %d): Получено асинхронное сообщение тип %u, номер %u.\n",
-                   svm_id_async, msg_async->header.message_type, msg_num_async);
-            
-            char gui_details_async[256] = "Async Data"; // Общее описание
-            char gui_bcb_field_async[32] = "";
-            bool bcb_found_async = false;
-            // (Можно добавить извлечение BCB, если он есть в этих асинхронных сообщениях)
-
-            snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
-                     "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
-                     svm_id_async, msg_async->header.message_type, msg_num_async,
-                     msg_async->header.address,
-                     bcb_found_async ? gui_bcb_field_async : "", gui_details_async);
-            send_to_gui_socket(gui_buffer_main_loop);
-
-            // Обновляем last_activity_time
-            pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id_async >=0 && svm_id_async < num_svms_in_config) {
-                 svm_links[svm_id_async].last_activity_time = time(NULL);
-            }
-            pthread_mutex_unlock(&uvm_links_mutex);
-
-        } else {
-            if (!uvm_keep_running) break; // Выходим, если пришел сигнал завершения
-             // Проверяем Keep-Alive, если очередь пуста
-            time_t now_final_ka_check = time(NULL);
-            bool ka_processed_something = false;
-            pthread_mutex_lock(&uvm_links_mutex);
-            for (int ka_final_idx = 0; ka_final_idx < num_svms_in_config; ++ka_final_idx) {
-                if (!config.svm_config_loaded[ka_final_idx]) continue;
-                UvmSvmLink *link_ka_final = &svm_links[ka_final_idx];
-                if (link_ka_final->status == UVM_LINK_ACTIVE &&
-                    link_ka_final->last_activity_time > 0 &&
-                    (now_final_ka_check - link_ka_final->last_activity_time) > KEEP_ALIVE_TIMEOUT_SEC_MAIN) {
-                    // ... (логика обработки Keep-Alive таймаута как в БЛОКЕ 4 выше) ...
-                    // ... (установка FAILED, отправка EVENT'ов в GUI) ...
-                    ka_processed_something = true;
-                }
-            }
-            pthread_mutex_unlock(&uvm_links_mutex);
-            if(!ka_processed_something && uvm_keep_running) { // Если и KA ничего не сделал
-                usleep(100000); // 100 мс
-            }
-        }
-    } // end final while (uvm_keep_running)
 
 
 cleanup_connections: // Метка для goto при ошибках на ранних этапах
