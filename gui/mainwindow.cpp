@@ -69,8 +69,8 @@ MainWindow::~MainWindow()
 
 void MainWindow::initTableWidget(QTableWidget* table) {
     if (!table) return;
-    table->setColumnCount(8);
-    QStringList headers = {"Время", "Напр/Соб.", "LAK SVM", "BCB", "Тип сообщ.", "Имя сообщ.", "Номер сообщ.", "Детали"};
+    table->setColumnCount(9);
+    QStringList headers = {"Время", "Напр/Соб.", "LAK SVM", "BCB", "Вес, Б", "Тип сообщ.", "Имя сообщ.", "Номер сообщ.", "Детали"}; 
     table->setHorizontalHeaderLabels(headers);
     table->horizontalHeader()->setStretchLastSection(true); // Последний столбец (Детали) растягивается
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -78,14 +78,15 @@ void MainWindow::initTableWidget(QTableWidget* table) {
     table->setWordWrap(false); // Отключаем автоперенос в ячейках для краткости
 
     // Примерная настройка ширины столбцов
-    table->setColumnWidth(0, 100); // Время (hh:mm:ss.zzz)
-    table->setColumnWidth(1, 80);  // Направление/Событие (SENT, RECV, EVENT)
+    table->setColumnWidth(0, 100); // Время
+    table->setColumnWidth(1, 80);  // Напр/Соб.
     table->setColumnWidth(2, 70);  // LAK SVM
-	table->setColumnWidth(3, 80);  // BCB
-    table->setColumnWidth(4, 50);  // Тип сообщения (число)
-    table->setColumnWidth(5, 200); // Имя сообщения
-    table->setColumnWidth(6, 70);  // Номер сообщения
-    // table->setColumnWidth(7, 250); // Детали - будет растягиваться
+    table->setColumnWidth(3, 80);  // BCB
+    table->setColumnWidth(4, 60);  // Вес, Б <--- НОВЫЙ СТОЛБЕЦ
+    table->setColumnWidth(5, 50);  // Тип сообщ. (сдвинулся)
+    table->setColumnWidth(6, 180); // Имя сообщ. (сдвинулся, можно уменьшить если нужно)
+    table->setColumnWidth(7, 70);  // Номер сообщ. (сдвинулся)
+    // table->setColumnWidth(8, ...); // Детали - растягивается (сдвинулся)
     table->verticalHeader()->setVisible(false); // Скрыть нумерацию строк слева
 }
 
@@ -93,6 +94,7 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
                                    int msgType, const QString &msgName, int msgNum,
                                    int lakInIPCMessage, // Назовите одинаково с .h
                                    quint32 bcb,       // <--- ИЗМЕНИТЕ ЗДЕСЬ ИМЯ АРГУМЕНТА НА "bcb"
+								   int weight,
                                    const QString &details)
 {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
@@ -122,23 +124,34 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
     // что тоже можно отобразить или оставить N/A. Пока оставляем так.
     table->setItem(row, 2, new QTableWidgetItem((displayLak >=0) ? QString("0x%1").arg(displayLak, 2, 16, QChar('0')).toUpper() : "N/A"));
 
-    // 4, 5, 6, 7: Тип, Имя, Номер, Детали
-	if (directionOrEventType == "SENT" || directionOrEventType == "RECV") {
-		if (bcb != 0) { // bcb - это аргумент quint32 bcb, пришедший из сигнала
-			table->setItem(row, 3, new QTableWidgetItem(QString("0x%1").arg(bcb, 8, 16, QChar('0')).toUpper()));
-		} else {
-			table->setItem(row, 3, new QTableWidgetItem("-"));
-		}
-		table->setItem(row, 4, new QTableWidgetItem(QString::number(msgType))); // сдвигается
-		table->setItem(row, 5, new QTableWidgetItem(msgName)); // сдвигается
-		table->setItem(row, 6, new QTableWidgetItem(QString::number(msgNum))); // сдвигается
-		table->setItem(row, 7, new QTableWidgetItem(details)); // сдвигается
+    // 4. BCB
+    if (directionOrEventType == "SENT" || directionOrEventType == "RECV") {
+        if (bcb != 0) {
+            table->setItem(row, 3, new QTableWidgetItem(QString("0x%1").arg(bcb, 8, 16, QChar('0')).toUpper()));
+        } else {
+            table->setItem(row, 3, new QTableWidgetItem("-"));
+        }
+        // 5. Вес 
+        if (weight > 0) {
+            table->setItem(row, 4, new QTableWidgetItem(QString::number(weight)));
+        } else {
+            table->setItem(row, 4, new QTableWidgetItem("-"));
+        }
+        // 6. Тип сообщения
+        table->setItem(row, 5, new QTableWidgetItem(QString::number(msgType)));
+        // 7. Имя сообщения
+        table->setItem(row, 6, new QTableWidgetItem(msgName));
+        // 8. Номер сообщения
+        table->setItem(row, 7, new QTableWidgetItem(QString::number(msgNum)));
+        // 9. Детали
+        table->setItem(row, 8, new QTableWidgetItem(details));
     } else { // EVENT
-		table->setItem(row, 3, new QTableWidgetItem("-")); // BCB для EVENT
-		table->setItem(row, 4, new QTableWidgetItem("-"));
-		table->setItem(row, 5, new QTableWidgetItem(msgName)); // Имя события
-		table->setItem(row, 6, new QTableWidgetItem("-"));
-		table->setItem(row, 7, new QTableWidgetItem(details));
+        table->setItem(row, 3, new QTableWidgetItem("-")); // BCB для EVENT
+        table->setItem(row, 4, new QTableWidgetItem("-")); // Вес для EVENT
+        table->setItem(row, 5, new QTableWidgetItem("-")); // Тип
+        table->setItem(row, 6, new QTableWidgetItem(msgName)); // Имя события
+        table->setItem(row, 7, new QTableWidgetItem("-")); // Номер
+        table->setItem(row, 8, new QTableWidgetItem(details)); // Детали
     }
 
     // Обновляем основной LAK QLabel (это делает updateSvmLinkStatusDisplay, когда LAK становится известен)

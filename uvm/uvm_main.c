@@ -118,14 +118,13 @@ bool send_uvm_request(UvmRequest *request) {
         return false;
     }
     // bool success = true; // success будет определяться по результату enqueue
-    char gui_msg_buffer[256];
+    char gui_msg_buffer[300];
 
     printf("send_uvm_request: Вход. Запрос для SVM %d, тип протокольного сообщения %d, тип UVM запроса %d.\n",
            request->target_svm_id, request->message.header.message_type, request->type);
 
     if (request->type == UVM_REQ_SEND_MESSAGE) {
         printf("send_uvm_request: Тип UVM запроса UVM_REQ_SEND_MESSAGE. Проверка линка (мьютекс должен быть уже взят вызывающим!)...\n"); // ИЗМЕНЕН КОММЕНТАРИЙ
-        // pthread_mutex_lock(&uvm_links_mutex); // <--- УБРАТЬ ЭТУ СТРОКУ
 
         if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
             UvmSvmLink *link = &svm_links[request->target_svm_id]; // ДОСТУП К svm_links ТЕПЕРЬ НЕ ЗАЩИЩЕН ЗДЕСЬ!
@@ -137,12 +136,27 @@ bool send_uvm_request(UvmRequest *request) {
                 link->last_sent_msg_num = get_full_message_number(&request->message.header);
                 link->last_sent_msg_time = time(NULL);
 
+                // --- Вычисление веса для SENT ---
+                // Предполагаем, что request->message.header.body_length УЖЕ в хостовом порядке на этом этапе,
+                // так как оно заполняется билдерами, которые работают с хостовым порядком,
+                // а в сетевой преобразуется только в io_common.c перед самой отправкой.
+                // Если это не так, и body_length здесь в сетевом, нужно будет сделать ntohs() перед вычислением.
+                // Давайте для безопасности сделаем копию и преобразуем ее, если нужно.
+                Message temp_msg_for_weight = request->message; // Копируем структуру
+                message_to_host_byte_order(&temp_msg_for_weight); // Гарантируем хостовый порядок для body_length
+                uint16_t body_len_sent_host = temp_msg_for_weight.header.body_length;
+                size_t weight_sent = sizeof(MessageHeader) + body_len_sent_host;
+                // --- КОНЕЦ---
+
+
                 // Отправка в GUI должна быть безопасной относительно gui_socket_mutex,
-                // который независим от uvm_links_mutex.
-                snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                         "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
-                         request->target_svm_id, request->message.header.message_type,
-                         link->last_sent_msg_num, link->assigned_lak);
+                // snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                         "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X;Weight:%zu", // <-- ДОБАВЛЕНО ;Weight:%zu
+                         request->target_svm_id,
+                         request->message.header.message_type,
+                         link->last_sent_msg_num,
+                         link->assigned_lak,
+                         weight_sent); // <-- ПЕРЕДАЕМ ВЕС
                 send_to_gui_socket(gui_msg_buffer); // send_to_gui_socket сама берет свой мьютекс
                 printf("send_uvm_request: SENT событие отправлено в GUI для SVM %d, тип %d.\n", request->target_svm_id, request->message.header.message_type);
             } else {
@@ -773,6 +787,11 @@ int main(int argc, char *argv[]) {
                 UvmSvmLink *link_resp = &svm_links[svm_id_resp];
                 link_resp->last_activity_time = time(NULL); // Обновляем время последней активности
 
+				// --- Вычисление веса для RECV ---
+				uint16_t body_len_recv_host = msg_resp->header.body_length; // Уже в хостовом порядке
+				size_t weight_recv = sizeof(MessageHeader) + body_len_recv_host;
+				// --- КОНЕЦ ---
+
                 // Переменные для формирования сообщения в GUI
                 char gui_details_for_recv[256] = "N/A";
                 char gui_bcb_for_recv[32] = "";
@@ -831,13 +850,15 @@ int main(int argc, char *argv[]) {
                 }
 
                 // --- Отправка RECV сообщения в GUI ---
-                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
-                         "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
-                         svm_id_resp, msg_resp->header.message_type, msg_num_resp,
-                         msg_resp->header.address, // LAK SVM из заголовка
-                         bcb_found_for_recv ? gui_bcb_for_recv : "",
-                         gui_details_for_recv);
-                send_to_gui_socket(gui_buffer_main_loop);
+				snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
+						 "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Weight:%zu;Details:%s", // <-- ДОБАВЛЕНО ;Weight:%zu
+						 svm_id_resp, msg_resp->header.message_type, msg_num_resp,
+						 msg_resp->header.address,
+						 bcb_found_for_recv ? gui_bcb_for_recv : "",
+						 weight_recv, // <-- ПЕРЕДАЕМ ВЕС
+						 gui_details_for_recv);
+				send_to_gui_socket(gui_buffer_main_loop);
+
 
                 // --- Логика машины состояний подготовки ---
                 bool reply_ok_for_state_transition = true; // По умолчанию считаем ответ достаточным для перехода

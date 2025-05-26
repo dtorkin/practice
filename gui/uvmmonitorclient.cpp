@@ -132,6 +132,7 @@ void UvmMonitorClient::parseData(const QByteArray& data)
      int msgNum = -1;
 	 quint32 bcbFromIPC = 0;
      int lak = -1; // LAK, пришедший в строке (может быть LAK SVM для SENT или LAK UVM для RECV)
+	 int weightFromIPC = 0;
      QString detailsStr = "";
      QDateTime timestamp = QDateTime::currentDateTime();
 
@@ -193,6 +194,15 @@ void UvmMonitorClient::parseData(const QByteArray& data)
      if (fieldsMap.contains("Details")) {
          detailsStr = fieldsMap.value("Details");
      }
+	 
+    if (fieldsMap.contains("Weight")) { // <--- ИЗВЛЕКАЕМ ПОЛЕ WEIGHT
+        bool ok_weight;
+        weightFromIPC = fieldsMap.value("Weight").toInt(&ok_weight);
+        if (!ok_weight) {
+            qWarning() << "IPC: Failed to parse Weight for SVM" << svmId << ":" << fieldsMap.value("Weight");
+            weightFromIPC = 0; // Сброс при ошибке
+        }
+    }
 
      if (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") {
          if (msgType != -1) {
@@ -220,6 +230,7 @@ void UvmMonitorClient::parseData(const QByteArray& data)
     emit newMessageOrEvent(svmId, timestamp, eventDirectionOrType, msgType, msgName, msgNum,
                            lak, // LAK из строки IPC
                            (eventDirectionOrType == "SENT" || eventDirectionOrType == "RECV") ? bcbFromIPC : 0, // Передаем BCB для SENT/RECV, 0 для EVENT
+						   weightFromIPC,
                            detailsStr);
 
      // Отдельный сигнал для LinkStatus, если он был передан как EVENT
