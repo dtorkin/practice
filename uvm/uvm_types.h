@@ -72,6 +72,12 @@ typedef struct UvmSvmLink {
     LogicalAddress assigned_lak; // Ожидаемый/подтвержденный LAK
     pthread_t receiver_tid; // ID потока-приемника
     time_t last_activity_time; // Время последней АКТИВНОСТИ (получения сообщения)
+	
+	PreparationState prep_state;         // Текущее состояние на этапе подготовки
+    time_t last_command_sent_time;     // Время отправки последней команды, на которую ожидается ответ
+    uint16_t current_preparation_msg_num; // Счетчик номеров сообщений для команд подготовки ЭТОГО SVM
+                                         // (заменяет msg_counters[i] из main для этого этапа)
+    uint8_t last_sent_prep_cmd_type;     // Тип последней отправленной команды подготовки (для отладки/таймаута)
 
     // --- Поля для GUI и внутреннего отслеживания ---
     MessageType last_sent_msg_type;   // Тип последнего отправленного UVM сообщения этому SVM
@@ -99,5 +105,17 @@ typedef struct UvmSvmLink {
     bool        control_failure_detected; // Был ли RSK != ожидаемого "ОК"
 } UvmSvmLink;
 
+typedef enum {
+    PREP_STATE_NOT_STARTED,             // Начальное состояние или после ошибки
+    PREP_STATE_CONNECTING,              // UVM пытается установить TCP соединение (это уже есть в UvmLinkStatus)
+                                        // Будем считать, что если UvmLinkStatus == UVM_LINK_ACTIVE, то TCP есть.
+                                        // PREP_STATE_NOT_STARTED будет начальным после успешного TCP-соединения.
+    PREP_STATE_AWAITING_CONFIRM_INIT,
+    PREP_STATE_AWAITING_CONFIRM_KONTROL,
+    PREP_STATE_AWAITING_RESULTS_KONTROL,
+    PREP_STATE_AWAITING_LINE_STATUS,
+    PREP_STATE_PREPARATION_COMPLETE,      // Этап подготовки завершен, готов к параметрам съемки
+    PREP_STATE_FAILED                     // Ошибка на этапе подготовки
+} PreparationState;
 
 #endif // UVM_TYPES_H
