@@ -596,92 +596,100 @@ int main(int argc, char *argv[]) {
     while (uvm_keep_running) {
         bool processed_something_this_iteration = false; // Флаг, что на этой итерации что-то сделали
 
-        // === БЛОК 1: ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
+// === БЛОК 1: ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
         pthread_mutex_lock(&uvm_links_mutex);
         for (int i = 0; i < num_svms_in_config; ++i) {
             if (!config.svm_config_loaded[i]) continue;
             UvmSvmLink *link = &svm_links[i];
 
-            if (link->status == UVM_LINK_ACTIVE) { // Работаем только с активными TCP-линками
-                UvmRequest request_prep_send;
-                request_prep_send.type = UVM_REQ_SEND_MESSAGE;
-                request_prep_send.target_svm_id = i;
-                bool command_to_send_prepared = false;
-                MessageType sent_command_type_for_state_change = (MessageType)0;
+            // Эту переменную нужно объявлять и инициализировать ВНУТРИ цикла for
+            bool command_to_send_prepared_now = false; // Используем новое имя для ясности
+            UvmRequest request_to_send; // Объявляем здесь, чтобы она была видна до if(command_to_send_prepared_now)
+            request_to_send.type = UVM_REQ_SEND_MESSAGE;
+            request_to_send.target_svm_id = i;
+            MessageType sent_cmd_type_for_state_now = (MessageType)0; // Новое имя
+
+            if (link->status == UVM_LINK_ACTIVE &&
+                link->prep_state != PREP_STATE_PREPARATION_COMPLETE &&
+                link->prep_state != PREP_STATE_FAILED) {
+
+                // printf("DEBUG: SVM %d, prep_state: %d\n", i, link->prep_state); // Для отладки состояния
 
                 switch (link->prep_state) {
-                    case PREP_STATE_NOT_STARTED: // Готов отправить "Инициализация канала"
-                        request_prep_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
-                        InitChannelBody *init_b_send = (InitChannelBody*)request_prep_send.message.body;
-                        init_b_send->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_send->lak = link->assigned_lak;
-                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
-                        sent_command_type_for_state_change = MESSAGE_TYPE_INIT_CHANNEL;
-                        command_to_send_prepared = true;
-                        printf("UVM Main (SVM %d): Подготовка к отправке 'Инициализация канала' (Num %u).\n", i, link->current_preparation_msg_num);
+                    case PREP_STATE_NOT_STARTED:
+                        request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
+                        InitChannelBody *init_b_send_dbg = (InitChannelBody*)request_to_send.message.body;
+                        init_b_send_dbg->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_send_dbg->lak = link->assigned_lak;
+                        // link->last_sent_prep_cmd_type УСТАНОВИМ ПОЗЖЕ, ЕСЛИ ОТПРАВКА УСПЕШНА
+                        sent_cmd_type_for_state_now = MESSAGE_TYPE_INIT_CHANNEL;
+                        command_to_send_prepared_now = true;
+                        printf("UVM Main (SVM %d): Команда 'Инициализация канала' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
                         break;
 
-                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // ConfirmInit получен, готов отправить "Провести контроль"
-                        request_prep_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
-                        ProvestiKontrolBody* pk_b_send = (ProvestiKontrolBody*)request_prep_send.message.body; pk_b_send->tk = 0x01;
-                        request_prep_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
-                        sent_command_type_for_state_change = MESSAGE_TYPE_PROVESTI_KONTROL;
-                        command_to_send_prepared = true;
-                        printf("UVM Main (SVM %d): Подготовка к отправке 'Провести контроль' (Num %u).\n", i, link->current_preparation_msg_num);
+                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // Означает: ConfirmInit был ОК, ПОРА слать ProvestiKontrol
+                        request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
+                        ProvestiKontrolBody* pk_b_send_dbg = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_send_dbg->tk = 0x01;
+                        request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
+                        sent_cmd_type_for_state_now = MESSAGE_TYPE_PROVESTI_KONTROL;
+                        command_to_send_prepared_now = true;
+                        printf("UVM Main (SVM %d): Команда 'Провести контроль' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
                         break;
 
-                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // PodtverzhdenieKontrolya получено, готов отправить "Выдать результаты"
-                        request_prep_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
-                        VydatRezultatyKontrolyaBody* vrk_b_send = (VydatRezultatyKontrolyaBody*)request_prep_send.message.body; vrk_b_send->vrk = 0x0F;
-                        request_prep_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
-                        sent_command_type_for_state_change = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
-                        command_to_send_prepared = true;
-                        printf("UVM Main (SVM %d): Подготовка к отправке 'Выдать результаты контроля' (Num %u).\n", i, link->current_preparation_msg_num);
+                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // Означает: PodtverzhdenieKontrolya было ОК, ПОРА слать VydatRezultaty
+                        request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
+                        VydatRezultatyKontrolyaBody* vrk_b_send_dbg = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_send_dbg->vrk = 0x0F;
+                        request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
+                        sent_cmd_type_for_state_now = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                        command_to_send_prepared_now = true;
+                        printf("UVM Main (SVM %d): Команда 'Выдать результаты контроля' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
                         break;
 
-                    case PREP_STATE_AWAITING_LINE_STATUS: // RezultatyKontrolya получены, готов отправить "Выдать состояние линии"
-                        request_prep_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
-                        link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
-                        sent_command_type_for_state_change = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
-                        command_to_send_prepared = true;
-                        printf("UVM Main (SVM %d): Подготовка к отправке 'Выдать состояние линии' (Num %u).\n", i, link->current_preparation_msg_num);
+                    case PREP_STATE_AWAITING_LINE_STATUS: // Означает: RezultatyKontrolya были ОК, ПОРА слать VydatSostoyanieLinii
+                        request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
+                        sent_cmd_type_for_state_now = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                        command_to_send_prepared_now = true;
+                        printf("UVM Main (SVM %d): Команда 'Выдать состояние линии' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
                         break;
 
-                    default: // В состояниях ожидания ответа или FAILED/COMPLETE команды не отправляем
+                    // Эти состояния означают, что мы ЖДЕМ ОТВЕТА, поэтому в этом блоке для них ничего не делаем
+                    case PREP_STATE_AWAITING_CONFIRM_INIT:
+                    // PREP_STATE_AWAITING_PODTV_KONTROL_REPLY (если бы переименовали)
+                    // PREP_STATE_AWAITING_REZ_KONTROL_REPLY
+                    // PREP_STATE_AWAITING_LINE_STATUS_REPLY
+                        // printf("DEBUG: SVM %d в состоянии ожидания %d, пропускаем отправку.\n", i, link->prep_state);
                         break;
-                }
+                    default:
+                        // printf("DEBUG: SVM %d в prep_state %d, не подходящем для отправки команд подготовки.\n", i, link->prep_state);
+                        break;
+                } // конец switch
 
-                if (command_to_send_prepared) {
-                    if (send_uvm_request(&request_prep_send)) {
+                if (command_to_send_prepared_now) {
+                    printf("UVM Main (SVM %d): Попытка отправки команды типа %u (Num %u)...\n", i, sent_cmd_type_for_state_now, link->current_preparation_msg_num);
+                    if (send_uvm_request(&request_to_send)) { // send_uvm_request теперь вернет true/false
                         link->last_command_sent_time = time(NULL);
-                        // Переводим в соответствующее состояние ОЖИДАНИЯ ответа
-                        if (sent_command_type_for_state_change == MESSAGE_TYPE_INIT_CHANNEL) {
+                        link->last_sent_prep_cmd_type = sent_cmd_type_for_state_now; // Сохраняем тип отправленной команды
+
+                        // Переводим в соответствующее состояние ОЖИДАНИЯ
+                        if (sent_cmd_type_for_state_now == MESSAGE_TYPE_INIT_CHANNEL) {
                             link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT;
-							printf("UVM Main (SVM %d): Состояние изменено на PREP_STATE_AWAITING_CONFIRM_INIT (%d).\n", i, link->prep_state); // <-- ОТЛАДКА
-                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_PROVESTI_KONTROL) {
-                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Ожидаем Подтверждение Контроля
-                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
-                            link->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Ожидаем Результаты Контроля
-                        } else if (sent_command_type_for_state_change == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
-                            link->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Ожидаем Состояние Линии
+                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_PROVESTI_KONTROL) {
+                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Остаемся в нем, ожидая PodtverzhdenieKontrolya
+                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
+                            link->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Остаемся в нем, ожидая RezultatyKontrolya
+                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+                            link->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Остаемся в нем, ожидая SostoyanieLinii
                         }
-                         printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
+                        printf("UVM Main (SVM %d): Команда типа %u (Num %u) ОТПРАВЛЕНА. Переход в состояние ожидания %d.\n",
                                i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
-                        // Номер сообщения link->current_preparation_msg_num инкрементируем при УСПЕШНОМ ПОЛУЧЕНИИ ОТВЕТА
                     } else {
-                        fprintf(stderr, "UVM Main (SVM %d): Ошибка отправки команды типа %u. Установка FAILED.\n", i, link->last_sent_prep_cmd_type);
+                        fprintf(stderr, "UVM Main (SVM %d): Ошибка вызова send_uvm_request для команды типа %u. Установка FAILED.\n", i, sent_cmd_type_for_state_now);
                         link->prep_state = PREP_STATE_FAILED;
                         link->status = UVM_LINK_FAILED;
-                        char gui_event_send_fail_main[128];
-                        snprintf(gui_event_send_fail_main, sizeof(gui_event_send_fail_main),
-                                 "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X,Reason=SendFailPrepCmd%u",
-                                 i, UVM_LINK_FAILED, link->assigned_lak, link->last_sent_prep_cmd_type);
-                        send_to_gui_socket(gui_event_send_fail_main);
+                        // ... (EVENT в GUI) ...
                     }
-                    processed_something_this_iteration = true;
-                }
-            } // if link active
+                    processed_something_this_iteration = true; // Пометили, что что-то сделали
+                } // if command_to_send_prepared_now
+            } // if link active and not complete/failed
         } // for each svm
         pthread_mutex_unlock(&uvm_links_mutex);
 
