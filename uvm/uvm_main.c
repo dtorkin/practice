@@ -150,7 +150,7 @@ bool send_uvm_request(UvmRequest *request) {
 
 
                 // Отправка в GUI должна быть безопасной относительно gui_socket_mutex,
-                // snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
+                snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X;Weight:%zu", // <-- ДОБАВЛЕНО ;Weight:%zu
                          request->target_svm_id,
                          request->message.header.message_type,
