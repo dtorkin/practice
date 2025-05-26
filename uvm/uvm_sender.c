@@ -63,39 +63,23 @@ void* uvm_sender_thread_func(void* arg) {
             }
             pthread_mutex_unlock(&uvm_links_mutex);
 
-            if (is_active && io && handle >= 0) {
-                // Отправляем сообщение
-                if (send_protocol_message(io, handle, &request.message) != 0) {
-					fprintf(stderr, "UVM Sender: ОШИБКА отправки сообщения тип %u SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
-                    fprintf(stderr, "Sender Thread: Error sending message (type %u) to SVM ID %d (handle %d).\n",
-                           request.message.header.message_type, svm_id, handle);
-                    // Ошибка отправки - помечаем линк как неактивный
-                    pthread_mutex_lock(&uvm_links_mutex);
-                    if (svm_links[svm_id].status == UVM_LINK_ACTIVE) { // Доп. проверка
-                         svm_links[svm_id].status = UVM_LINK_FAILED;
-                         // Можно закрыть хэндл здесь или оставить Receiver'у/Main
-                         if (svm_links[svm_id].connection_handle >= 0) {
-                              shutdown(svm_links[svm_id].connection_handle, SHUT_RDWR);
-                              // close(svm_links[svm_id].connection_handle); // Не закрываем здесь
-                         }
-                         printf("Sender Thread: Marked SVM Link %d as FAILED due to send error.\n", svm_id);
-                         // Разбудить Receiver'а этого линка? (сложно без прямого доступа)
-                         // Main поток должен будет обработать статус FAILED
-                    }
-                    pthread_mutex_unlock(&uvm_links_mutex);
-                } else {
-                     printf("UVM Sender: Сообщение тип %u УСПЕШНО отправлено SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
-                }
-            } else {
-                 fprintf(stderr, "Sender Thread: Cannot send message to SVM ID %d (inactive or invalid).\n", svm_id);
-                 // Сообщение не отправлено, но счетчик все равно уменьшаем
-            }
+			if (is_active && io && handle >= 0) {
+				if (send_protocol_message(io, handle, &request.message) != 0) {
+					fprintf(stderr, "UVM Sender: ОШИБКА ФИЗИЧЕСКОЙ отправки сообщения тип %u SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
+				} else {
+					printf("UVM Sender: Сообщение тип %u УСПЕШНО ФИЗИЧЕСКИ отправлено SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
+				}
+			} else if (is_active) {
+				 fprintf(stderr, "UVM Sender: SVM %d активен, но io/handle невалидны. Пропуск отправки.\n", svm_id); // <-- ОТЛАДКА
+			} else {
+				 fprintf(stderr, "UVM Sender: SVM %d НЕ активен. Пропуск отправки.\n", svm_id); // <-- ОТЛАДКА
+			}
 
             // Уменьшаем счетчик ожидающих отправки и сигналим Main, если он ждет
             pthread_mutex_lock(&uvm_send_counter_mutex);
             if (uvm_outstanding_sends > 0) {
                 uvm_outstanding_sends--;
-                 //printf("Sender Thread: Decremented outstanding sends to %d\n", uvm_outstanding_sends);
+                 printf("UVM Sender: uvm_outstanding_sends уменьшен до %d (после обработки запроса тип %d для SVM %d).\n", uvm_outstanding_sends, request.message.header.message_type, request.target_svm_id); // <-- ОТЛАДКА
                 if (uvm_outstanding_sends == 0) {
                     //printf("Sender Thread: All pending messages sent, signaling Main.\n");
                     pthread_cond_signal(&uvm_all_sent_cond);
@@ -104,7 +88,7 @@ void* uvm_sender_thread_func(void* arg) {
             pthread_mutex_unlock(&uvm_send_counter_mutex);
 
         } else {
-            printf("Sender Thread: Received unhandled request type %d.\n", request.type);
+            fprintf(stderr, "UVM Sender: ВНИМАНИЕ! Попытка уменьшить uvm_outstanding_sends, когда он уже 0 или меньше.\n");
         }
     } // end while
 

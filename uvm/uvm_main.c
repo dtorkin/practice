@@ -113,46 +113,56 @@ void send_to_gui_socket(const char *message_to_gui) {
 
 // Функция отправки запроса Sender'у
 bool send_uvm_request(UvmRequest *request) {
-    if (!uvm_outgoing_request_queue || !request) return false;
+    if (!uvm_outgoing_request_queue || !request) {
+        fprintf(stderr, "send_uvm_request: ОШИБКА: очередь или запрос NULL.\n"); // <-- ОТЛАДКА
+        return false;
+    }
     bool success = true;
-    char gui_msg_buffer[256]; // Для отправки в GUI
+    char gui_msg_buffer[256];
+
+    printf("send_uvm_request: Попытка поместить в очередь запрос для SVM %d, тип %d.\n", request->target_svm_id, request->message.header.message_type); // <-- ОТЛАДКА
 
     if (request->type == UVM_REQ_SEND_MESSAGE) {
-        pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) { // Используем MAX_SVM_INSTANCES
-            UvmSvmLink *link = &svm_links[request->target_svm_id]; // Получаем указатель на link
-            if (link->status == UVM_LINK_ACTIVE) {
+        // ... (ваш существующий код для обновления svm_links и отправки в GUI для SENT) ...
+        // Этот код для GUI должен выполняться ДО постановки в очередь, чтобы GUI узнал о НАМЕРЕНИИ отправить
+         pthread_mutex_lock(&uvm_links_mutex);
+         if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
+             UvmSvmLink *link = &svm_links[request->target_svm_id];
+             if (link->status == UVM_LINK_ACTIVE) { // Отправляем SENT в GUI только если линк активен
                  link->last_sent_msg_type = request->message.header.message_type;
                  link->last_sent_msg_num = get_full_message_number(&request->message.header);
                  link->last_sent_msg_time = time(NULL);
 
-                 // --- ИСПРАВЛЕННЫЙ БЛОК ДЛЯ GUI ---
                  snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
-                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X", // Сообщение типа SENT
-                          request->target_svm_id,                     // Используем target_svm_id
-                          request->message.header.message_type,       // Тип отправляемого сообщения
-                          link->last_sent_msg_num,                    // Номер отправляемого (уже обновлен)
-                          link->assigned_lak);                        // LAK этого линка
+                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
+                          request->target_svm_id,
+                          request->message.header.message_type,
+                          link->last_sent_msg_num,
+                          link->assigned_lak); // Используем assigned_lak линка
                  send_to_gui_socket(gui_msg_buffer);
-                 // --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
-            }
-        }
-        pthread_mutex_unlock(&uvm_links_mutex);
+                 printf("send_uvm_request: SENT событие отправлено в GUI для SVM %d, тип %d.\n", request->target_svm_id, request->message.header.message_type); // <-- ОТЛАДКА
+             }
+         }
+         pthread_mutex_unlock(&uvm_links_mutex);
 
         pthread_mutex_lock(&uvm_send_counter_mutex);
         uvm_outstanding_sends++;
         pthread_mutex_unlock(&uvm_send_counter_mutex);
+        printf("send_uvm_request: uvm_outstanding_sends увеличен до %d.\n", uvm_outstanding_sends); // <-- ОТЛАДКА
     }
 
     if (!queue_req_enqueue(uvm_outgoing_request_queue, request)) {
-        fprintf(stderr, "UVM Main: Failed to enqueue request (type %s, target_svm_id %d)\n",
+        fprintf(stderr, "send_uvm_request: ОШИБКА: Failed to enqueue request (type %s, target_svm_id %d)\n",
                 uvm_request_type_to_message_name(request->type), request->target_svm_id);
         success = false;
         if (request->type == UVM_REQ_SEND_MESSAGE) {
              pthread_mutex_lock(&uvm_send_counter_mutex);
              if(uvm_outstanding_sends > 0) uvm_outstanding_sends--;
+             printf("send_uvm_request: uvm_outstanding_sends уменьшен (ошибка enqueue) до %d.\n", uvm_outstanding_sends); // <-- ОТЛАДКА
              pthread_mutex_unlock(&uvm_send_counter_mutex);
         }
+    } else {
+        printf("send_uvm_request: Запрос для SVM %d, тип %d УСПЕШНО помещен в очередь.\n", request->target_svm_id, request->message.header.message_type); // <-- ОТЛАДКА
     }
     return success;
 }
