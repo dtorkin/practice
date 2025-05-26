@@ -34,7 +34,7 @@
 AppConfig config;
 SvmInstance svm_instances[MAX_SVM_INSTANCES];
 ThreadSafeQueuedMsgQueue *svm_outgoing_queue = NULL;
-// pthread_mutex_t svm_instances_mutex; // Глобальный мьютекс для всего массива svm_instances, если он нужен.
+pthread_mutex_t svm_instances_mutex; // Глобальный мьютекс для всего массива svm_instances, если он нужен.
                                       // Пока что каждый instance имеет свой мьютекс.
 int listen_sockets[MAX_SVM_INSTANCES];
 pthread_t listener_threads[MAX_SVM_INSTANCES];

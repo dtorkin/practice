@@ -21,6 +21,8 @@
 // Предварительное объявление структуры очереди
 struct ThreadSafeQueuedMsgQueue;
 
+extern pthread_mutex_t svm_instances_mutex;
+
 // Структура для хранения состояния связи с одним SVM
 typedef struct SvmInstance {
     // --- Основные поля (как были) ---
