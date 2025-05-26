@@ -79,7 +79,7 @@ void* uvm_sender_thread_func(void* arg) {
             pthread_mutex_lock(&uvm_send_counter_mutex);
             if (uvm_outstanding_sends > 0) {
                 uvm_outstanding_sends--;
-                 printf("UVM Sender: uvm_outstanding_sends уменьшен до %d (после обработки запроса тип %d для SVM %d).\n", uvm_outstanding_sends, request.message.header.message_type, request.target_svm_id); // <-- ОТЛАДКА
+                 //printf("UVM Sender: uvm_outstanding_sends уменьшен до %d (после обработки запроса тип %d для SVM %d).\n", uvm_outstanding_sends, request.message.header.message_type, request.target_svm_id); // <-- ОТЛАДКА
                 if (uvm_outstanding_sends == 0) {
                     //printf("Sender Thread: All pending messages sent, signaling Main.\n");
                     pthread_cond_signal(&uvm_all_sent_cond);
