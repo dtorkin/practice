@@ -685,7 +685,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
                 printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
                        i, temp_sent_cmd_type, link->current_preparation_msg_num, link->prep_state);
                     } else {
-                        fprintf(stderr, "UVM Main (SVM %d): Ошибка постановки в очередь команды типа %u. Установка FAILED.\n", i, sent_cmd_type_for_state_now); // ИЗМЕНЕНО
+                        fprintf(stderr, "UVM Main (SVM %d): Ошибка постановки в очередь команды типа %u. Установка FAILED.\n", i, temp_sent_cmd_type); // ИЗМЕНЕНО
                         link->prep_state = PREP_STATE_FAILED;
                         link->status = UVM_LINK_FAILED;
                         // ... (EVENT в GUI) ...
@@ -911,22 +911,22 @@ for (int i = 0; i < num_svms_in_config; ++i) {
                     case PREP_STATE_AWAITING_CONFIRM_INIT_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_CONFIRM_INIT_S_MAIN;
                         cmd_name_for_timeout_event = "InitChannel";
-                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_CONFIRM_INIT;
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_CONFIRM_INIT;
                         break;
                     case PREP_STATE_AWAITING_PODTV_KONTROL_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_CONFIRM_KONTROL_S_MAIN;
                         cmd_name_for_timeout_event = "ProvestiKontrol";
-                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
                         break;
                     case PREP_STATE_AWAITING_REZ_KONTROL_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_RESULTS_KONTROL_S_MAIN;
                         cmd_name_for_timeout_event = "VydatRezultatyKontrolya";
-                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_RESULTATY_KONTROLYA;
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_RESULTATY_KONTROLYA;
                         break;
                     case PREP_STATE_AWAITING_LINE_STATUS_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_LINE_STATUS_S_MAIN;
                         cmd_name_for_timeout_event = "VydatSostoyanieLinii";
-                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_SOSTOYANIE_LINII;
+                        expected_reply_for_timeout_event = MESSAGE_TYPE_SOSTOYANIE_LINII;
                         break;
                     default: break;
                 }
