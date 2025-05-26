@@ -91,9 +91,9 @@ void MainWindow::initTableWidget(QTableWidget* table) {
 
 void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
-                                   int lakInIPCMessage, // LAK из строки IPC (может быть LAK SVM для SENT, или LAK UVM для RECV)
-                                   quint32 bcbFromEvent,  // BCB, извлеченный парсером из поля BCB:
-                                   const QString &details) // Остальные детали (например, RSK, TKS)
+                                   int assignedLak, // Назовите одинаково с .h
+                                   quint32 bcb,       // <--- ИЗМЕНИТЕ ЗДЕСЬ ИМЯ АРГУМЕНТА НА "bcb"
+                                   const QString &details)
 {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
         qWarning() << "Received message/event for invalid SVM ID or uninitialized table:" << svmId;
