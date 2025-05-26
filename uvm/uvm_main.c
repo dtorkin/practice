@@ -487,7 +487,6 @@ int main(int argc, char *argv[]) {
 
          svm_links[i].status = UVM_LINK_CONNECTING;
          svm_links[i].assigned_lak = config.svm_settings[i].lak; // LAK из конфига SVM
-		 link->prep_state = PREP_STATE_READY_TO_SEND_INIT_CHANNEL;
 
 
          EthernetConfig current_svm_config = {0};
@@ -614,7 +613,7 @@ int main(int argc, char *argv[]) {
     pthread_mutex_lock(&uvm_links_mutex);
     for (int i = 0; i < num_svms_in_config; ++i) {
         if (config.svm_config_loaded[i] && svm_links[i].status == UVM_LINK_ACTIVE) {
-            svm_links[i].prep_state = PREP_STATE_NOT_STARTED; // Начальное состояние для отправки InitChannel
+            svm_links[i].prep_state = PREP_STATE_READY_TO_SEND_INIT_CHANNEL; // Начальное состояние для отправки InitChannel
             svm_links[i].current_preparation_msg_num = 0;     // Сброс счетчика сообщений подготовки
             svm_links[i].last_command_sent_time = 0;          // Сброс времени последней команды
         } else if (config.svm_config_loaded[i]) { // Если сконфигурирован, но TCP не активен
@@ -636,31 +635,31 @@ for (int i = 0; i < num_svms_in_config; ++i) {
     UvmRequest request_to_send;
     request_to_send.type = UVM_REQ_SEND_MESSAGE;
     request_to_send.target_svm_id = i;
-    // MessageType sent_cmd_type_for_state_now = (MessageType)0; // Не нужна, если сразу меняем состояние
+    MessageType temp_sent_cmd_type = (MessageType)0;
 
     if (link->status == UVM_LINK_ACTIVE && link->prep_state != PREP_STATE_PREPARATION_COMPLETE && link->prep_state != PREP_STATE_FAILED) {
         switch (link->prep_state) {
             case PREP_STATE_READY_TO_SEND_INIT_CHANNEL:
                 request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
                 InitChannelBody *init_b_s = (InitChannelBody*)request_to_send.message.body; init_b_s->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_s->lak = link->assigned_lak;
-                link->last_sent_prep_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
+                temp_sent_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
                 command_to_send_prepared_now = true;
                 break;
             case PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL:
                 request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
                 ProvestiKontrolBody* pk_b_s = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_s->tk = 0x01; request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-                link->last_sent_prep_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
+                temp_sent_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
                 command_to_send_prepared_now = true;
                 break;
             case PREP_STATE_READY_TO_SEND_VYDAT_REZ:
                 request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
                 VydatRezultatyKontrolyaBody* vrk_b_s = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_s->vrk = 0x0F; request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-                link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                temp_sent_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
                 command_to_send_prepared_now = true;
                 break;
             case PREP_STATE_READY_TO_SEND_VYDAT_SOST:
                 request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
-                link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                temp_sent_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
                 command_to_send_prepared_now = true;
                 break;
             default: // В состояниях AWAITING_..._REPLY ничего не отправляем из этого блока
@@ -668,22 +667,23 @@ for (int i = 0; i < num_svms_in_config; ++i) {
         }
 
         if (command_to_send_prepared_now) {
-            printf("UVM Main (SVM %d): Отправка команды типа %u (Num %u)...\n", i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num);
+            printf("UVM Main (SVM %d): Отправка команды типа %u (Num %u)...\n", i, temp_sent_cmd_type, link->current_preparation_msg_num);
             if (send_uvm_request(&request_to_send)) {
+                temp_sent_cmd_type = temp_sent_cmd_type; // <--- Используем temp_sent_cmd_type
                 link->last_command_sent_time = time(NULL);
                 // Переводим в соответствующее состояние ОЖИДАНИЯ ОТВЕТА
-                if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
+                if (temp_sent_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
                     link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT_REPLY;
-                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
+                } else if (temp_sent_cmd_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
                     link->prep_state = PREP_STATE_AWAITING_PODTV_KONTROL_REPLY;
-                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
+                } else if (temp_sent_cmd_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
                     link->prep_state = PREP_STATE_AWAITING_REZ_KONTROL_REPLY;
-                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+                } else if (temp_sent_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
                     link->prep_state = PREP_STATE_AWAITING_LINE_STATUS_REPLY;
                 }
                 // НЕ инкрементируем current_preparation_msg_num здесь! Он инкрементируется при УСПЕШНОМ ПОЛУЧЕНИИ ответа.
                 printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
-                       i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
+                       i, temp_sent_cmd_type, link->current_preparation_msg_num, link->prep_state);
                     } else {
                         fprintf(stderr, "UVM Main (SVM %d): Ошибка постановки в очередь команды типа %u. Установка FAILED.\n", i, sent_cmd_type_for_state_now); // ИЗМЕНЕНО
                         link->prep_state = PREP_STATE_FAILED;
@@ -700,6 +700,8 @@ for (int i = 0; i < num_svms_in_config; ++i) {
 // === БЛОК 2: ОБРАБОТКА ВХОДЯЩИХ ОТВЕТОВ ===
         if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data_main)) {
             processed_something_this_iteration = true; // Пометили, что что-то обработали
+			bool is_expected_reply = false; // <--- ОБЪЯВИТЕ ЗДЕСЬ
+			bool reply_is_ok_for_state_change = true;
             int svm_id_resp = response_msg_data_main.source_svm_id;
             Message *msg_resp = &response_msg_data_main.message;
             
@@ -787,6 +789,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
                     switch (link_resp->prep_state) {
                         case PREP_STATE_AWAITING_CONFIRM_INIT_REPLY:
                             if (msg_resp->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
+								is_expected_reply = true;
                                 ConfirmInitBody* ci_body_recv = (ConfirmInitBody*)msg_resp->body;
                                 printf("UVM Main (SVM %d): Обработка ответа 'Подтверждение инициализации'.\n", svm_id_resp);
                                 if (ci_body_recv->lak != link_resp->assigned_lak) {
@@ -805,6 +808,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
 
                         case PREP_STATE_AWAITING_PODTV_KONTROL_REPLY:
                             if (msg_resp->header.message_type == MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
+								is_expected_reply = true;
                                 // PodtverzhdenieKontrolyaBody* pkb_recv = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
                                 printf("UVM Main (SVM %d): Обработка ответа 'Подтверждение контроля'.\n", svm_id_resp);
                                 // (Доп. проверки, если нужны, например, LAK в теле pkb_recv->lak == link_resp->assigned_lak)
@@ -815,6 +819,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
 
                         case PREP_STATE_AWAITING_REZ_KONTROL_REPLY:
                             if (msg_resp->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
+								is_expected_reply = true;
                                 RezultatyKontrolyaBody* rkb_recv = (RezultatyKontrolyaBody*)msg_resp->body;
                                 printf("UVM Main (SVM %d): Обработка ответа 'Результаты контроля'. RSK=0x%02X\n", svm_id_resp, rkb_recv->rsk);
                                 if (rkb_recv->rsk != 0x3F) { // 0x3F - код "ОК"
@@ -835,6 +840,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
 
                         case PREP_STATE_AWAITING_LINE_STATUS_REPLY:
                             if (msg_resp->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
+								is_expected_reply = true;
                                 // SostoyanieLiniiBody* slb_recv = (SostoyanieLiniiBody*)msg_resp->body;
                                 printf("UVM Main (SVM %d): Обработка ответа 'Состояние линии'.\n", svm_id_resp);
                                 link_resp->prep_state = PREP_STATE_PREPARATION_COMPLETE;
@@ -879,7 +885,7 @@ for (int i = 0; i < num_svms_in_config; ++i) {
                     send_to_gui_socket(gui_buffer_main_loop);
                 }
 
-            } // if svm_id_resp_main valid
+            } // if svm_id_resp valid
             pthread_mutex_unlock(&uvm_links_mutex);
         } // if uvq_dequeue
 
@@ -902,25 +908,25 @@ for (int i = 0; i < num_svms_in_config; ++i) {
                 MessageType expected_reply_for_timeout_event = (MessageType)0;
 
                 switch(link_check_to->prep_state) {
-                    case PREP_STATE_AWAITING_CONFIRM_INIT:
+                    case PREP_STATE_AWAITING_CONFIRM_INIT_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_CONFIRM_INIT_S_MAIN;
                         cmd_name_for_timeout_event = "InitChannel";
-                        expected_reply_for_timeout_event = MESSAGE_TYPE_CONFIRM_INIT;
+                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_CONFIRM_INIT;
                         break;
-                    case PREP_STATE_AWAITING_CONFIRM_KONTROL:
+                    case PREP_STATE_AWAITING_PODTV_KONTROL_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_CONFIRM_KONTROL_S_MAIN;
                         cmd_name_for_timeout_event = "ProvestiKontrol";
-                        expected_reply_for_timeout_event = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
+                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA;
                         break;
-                    case PREP_STATE_AWAITING_RESULTS_KONTROL:
+                    case PREP_STATE_AWAITING_REZ_KONTROL_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_RESULTS_KONTROL_S_MAIN;
                         cmd_name_for_timeout_event = "VydatRezultatyKontrolya";
-                        expected_reply_for_timeout_event = MESSAGE_TYPE_RESULTATY_KONTROLYA;
+                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_RESULTATY_KONTROLYA;
                         break;
-                    case PREP_STATE_AWAITING_LINE_STATUS:
+                    case PREP_STATE_AWAITING_LINE_STATUS_REPLY: // <--- ИЗМЕНЕНО
                         current_timeout_val_s = TIMEOUT_LINE_STATUS_S_MAIN;
                         cmd_name_for_timeout_event = "VydatSostoyanieLinii";
-                        expected_reply_for_timeout_event = MESSAGE_TYPE_SOSTOYANIE_LINII;
+                        expected_reply_type_for_timeout_event = MESSAGE_TYPE_SOSTOYANIE_LINII;
                         break;
                     default: break;
                 }
