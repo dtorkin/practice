@@ -487,6 +487,7 @@ int main(int argc, char *argv[]) {
 
          svm_links[i].status = UVM_LINK_CONNECTING;
          svm_links[i].assigned_lak = config.svm_settings[i].lak; // LAK из конфига SVM
+		 link->prep_state = PREP_STATE_READY_TO_SEND_INIT_CHANNEL;
 
 
          EthernetConfig current_svm_config = {0};
@@ -627,90 +628,62 @@ int main(int argc, char *argv[]) {
         bool processed_something_this_iteration = false; // Флаг, что на этой итерации что-то сделали
 
 // === БЛОК 1: ОТПРАВКА СЛЕДУЮЩЕЙ КОМАНДЫ ПОДГОТОВКИ ===
-        pthread_mutex_lock(&uvm_links_mutex);
-        for (int i = 0; i < num_svms_in_config; ++i) {
-            if (!config.svm_config_loaded[i]) continue;
-            UvmSvmLink *link = &svm_links[i];
+pthread_mutex_lock(&uvm_links_mutex);
+for (int i = 0; i < num_svms_in_config; ++i) {
+    if (!config.svm_config_loaded[i]) continue;
+    UvmSvmLink *link = &svm_links[i];
+    bool command_to_send_prepared_now = false;
+    UvmRequest request_to_send;
+    request_to_send.type = UVM_REQ_SEND_MESSAGE;
+    request_to_send.target_svm_id = i;
+    // MessageType sent_cmd_type_for_state_now = (MessageType)0; // Не нужна, если сразу меняем состояние
 
-            // Эту переменную нужно объявлять и инициализировать ВНУТРИ цикла for
-            bool command_to_send_prepared_now = false; // Используем новое имя для ясности
-            UvmRequest request_to_send; // Объявляем здесь, чтобы она была видна до if(command_to_send_prepared_now)
-            request_to_send.type = UVM_REQ_SEND_MESSAGE;
-            request_to_send.target_svm_id = i;
-            MessageType sent_cmd_type_for_state_now = (MessageType)0; // Новое имя
+    if (link->status == UVM_LINK_ACTIVE && link->prep_state != PREP_STATE_PREPARATION_COMPLETE && link->prep_state != PREP_STATE_FAILED) {
+        switch (link->prep_state) {
+            case PREP_STATE_READY_TO_SEND_INIT_CHANNEL:
+                request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
+                InitChannelBody *init_b_s = (InitChannelBody*)request_to_send.message.body; init_b_s->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_s->lak = link->assigned_lak;
+                link->last_sent_prep_cmd_type = MESSAGE_TYPE_INIT_CHANNEL;
+                command_to_send_prepared_now = true;
+                break;
+            case PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL:
+                request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
+                ProvestiKontrolBody* pk_b_s = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_s->tk = 0x01; request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
+                link->last_sent_prep_cmd_type = MESSAGE_TYPE_PROVESTI_KONTROL;
+                command_to_send_prepared_now = true;
+                break;
+            case PREP_STATE_READY_TO_SEND_VYDAT_REZ:
+                request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
+                VydatRezultatyKontrolyaBody* vrk_b_s = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_s->vrk = 0x0F; request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
+                link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
+                command_to_send_prepared_now = true;
+                break;
+            case PREP_STATE_READY_TO_SEND_VYDAT_SOST:
+                request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
+                link->last_sent_prep_cmd_type = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
+                command_to_send_prepared_now = true;
+                break;
+            default: // В состояниях AWAITING_..._REPLY ничего не отправляем из этого блока
+                break;
+        }
 
-            if (link->status == UVM_LINK_ACTIVE &&
-                link->prep_state != PREP_STATE_PREPARATION_COMPLETE &&
-                link->prep_state != PREP_STATE_FAILED) {
-
-                // printf("DEBUG: SVM %d, prep_state: %d\n", i, link->prep_state); // Для отладки состояния
-
-                switch (link->prep_state) {
-                    case PREP_STATE_NOT_STARTED:
-                        request_to_send.message = create_init_channel_message(LOGICAL_ADDRESS_UVM_VAL, link->assigned_lak, link->current_preparation_msg_num);
-                        InitChannelBody *init_b_send_dbg = (InitChannelBody*)request_to_send.message.body;
-                        init_b_send_dbg->lauvm = LOGICAL_ADDRESS_UVM_VAL; init_b_send_dbg->lak = link->assigned_lak;
-                        // link->last_sent_prep_cmd_type УСТАНОВИМ ПОЗЖЕ, ЕСЛИ ОТПРАВКА УСПЕШНА
-                        sent_cmd_type_for_state_now = MESSAGE_TYPE_INIT_CHANNEL;
-                        command_to_send_prepared_now = true;
-                        printf("UVM Main (SVM %d): Команда 'Инициализация канала' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
-                        break;
-
-                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // Означает: ConfirmInit был ОК, ПОРА слать ProvestiKontrol
-                        request_to_send.message = create_provesti_kontrol_message(link->assigned_lak, 0x01, link->current_preparation_msg_num);
-                        ProvestiKontrolBody* pk_b_send_dbg = (ProvestiKontrolBody*)request_to_send.message.body; pk_b_send_dbg->tk = 0x01;
-                        request_to_send.message.header.body_length = htons(sizeof(ProvestiKontrolBody));
-                        sent_cmd_type_for_state_now = MESSAGE_TYPE_PROVESTI_KONTROL;
-                        command_to_send_prepared_now = true;
-                        printf("UVM Main (SVM %d): Команда 'Провести контроль' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
-                        break;
-
-                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // Означает: PodtverzhdenieKontrolya было ОК, ПОРА слать VydatRezultaty
-                        request_to_send.message = create_vydat_rezultaty_kontrolya_message(link->assigned_lak, 0x0F, link->current_preparation_msg_num);
-                        VydatRezultatyKontrolyaBody* vrk_b_send_dbg = (VydatRezultatyKontrolyaBody*)request_to_send.message.body; vrk_b_send_dbg->vrk = 0x0F;
-                        request_to_send.message.header.body_length = htons(sizeof(VydatRezultatyKontrolyaBody));
-                        sent_cmd_type_for_state_now = MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA;
-                        command_to_send_prepared_now = true;
-                        printf("UVM Main (SVM %d): Команда 'Выдать результаты контроля' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
-                        break;
-
-                    case PREP_STATE_AWAITING_LINE_STATUS: // Означает: RezultatyKontrolya были ОК, ПОРА слать VydatSostoyanieLinii
-                        request_to_send.message = create_vydat_sostoyanie_linii_message(link->assigned_lak, link->current_preparation_msg_num);
-                        sent_cmd_type_for_state_now = MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII;
-                        command_to_send_prepared_now = true;
-                        printf("UVM Main (SVM %d): Команда 'Выдать состояние линии' (Num %u) ПОДГОТОВЛЕНА к отправке.\n", i, link->current_preparation_msg_num);
-                        break;
-
-                    // Эти состояния означают, что мы ЖДЕМ ОТВЕТА, поэтому в этом блоке для них ничего не делаем
-                    case PREP_STATE_AWAITING_CONFIRM_INIT:
-                    // PREP_STATE_AWAITING_PODTV_KONTROL_REPLY (если бы переименовали)
-                    // PREP_STATE_AWAITING_REZ_KONTROL_REPLY
-                    // PREP_STATE_AWAITING_LINE_STATUS_REPLY
-                        // printf("DEBUG: SVM %d в состоянии ожидания %d, пропускаем отправку.\n", i, link->prep_state);
-                        break;
-                    default:
-                        // printf("DEBUG: SVM %d в prep_state %d, не подходящем для отправки команд подготовки.\n", i, link->prep_state);
-                        break;
-                } // конец switch
-
-                if (command_to_send_prepared_now) {
-                    printf("UVM Main (SVM %d): Попытка вызова send_uvm_request для команды типа %u (Num %u)...\n", i, sent_cmd_type_for_state_now, link->current_preparation_msg_num);
-                    if (send_uvm_request(&request_to_send)) {
-                        link->last_command_sent_time = time(NULL);
-                        link->last_sent_prep_cmd_type = sent_cmd_type_for_state_now;
-
-                        // Переводим в соответствующее состояние ОЖИДАНИЯ
-                        if (sent_cmd_type_for_state_now == MESSAGE_TYPE_INIT_CHANNEL) {
-                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT;
-                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_PROVESTI_KONTROL) {
-                            link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Остаемся в нем, ожидая PodtverzhdenieKontrolya
-                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
-                            link->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Остаемся в нем, ожидая RezultatyKontrolya
-                        } else if (sent_cmd_type_for_state_now == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
-                            link->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Остаемся в нем, ожидая SostoyanieLinii
-                        }
-                        printf("UVM Main (SVM %d): Команда типа %u (Num %u) успешно поставлена в очередь Sender'а. Переход в состояние ожидания %d.\n", // ИЗМЕНЕНО
-                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
+        if (command_to_send_prepared_now) {
+            printf("UVM Main (SVM %d): Отправка команды типа %u (Num %u)...\n", i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num);
+            if (send_uvm_request(&request_to_send)) {
+                link->last_command_sent_time = time(NULL);
+                // Переводим в соответствующее состояние ОЖИДАНИЯ ОТВЕТА
+                if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
+                    link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT_REPLY;
+                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_PROVESTI_KONTROL) {
+                    link->prep_state = PREP_STATE_AWAITING_PODTV_KONTROL_REPLY;
+                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {
+                    link->prep_state = PREP_STATE_AWAITING_REZ_KONTROL_REPLY;
+                } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
+                    link->prep_state = PREP_STATE_AWAITING_LINE_STATUS_REPLY;
+                }
+                // НЕ инкрементируем current_preparation_msg_num здесь! Он инкрементируется при УСПЕШНОМ ПОЛУЧЕНИИ ответа.
+                printf("UVM Main (SVM %d): Команда типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
+                       i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
                     } else {
                         fprintf(stderr, "UVM Main (SVM %d): Ошибка постановки в очередь команды типа %u. Установка FAILED.\n", i, sent_cmd_type_for_state_now); // ИЗМЕНЕНО
                         link->prep_state = PREP_STATE_FAILED;
@@ -724,159 +697,182 @@ int main(int argc, char *argv[]) {
         pthread_mutex_unlock(&uvm_links_mutex);
 
 
-        // === БЛОК 2: ОБРАБОТКА ВХОДЯЩИХ ОТВЕТОВ ===
+// === БЛОК 2: ОБРАБОТКА ВХОДЯЩИХ ОТВЕТОВ ===
         if (uvq_dequeue(uvm_incoming_response_queue, &response_msg_data_main)) {
-            processed_something_this_iteration = true;
+            processed_something_this_iteration = true; // Пометили, что что-то обработали
             int svm_id_resp = response_msg_data_main.source_svm_id;
             Message *msg_resp = &response_msg_data_main.message;
-            message_to_host_byte_order(msg_resp); // Преобразуем в хост-порядок
+            
+            // Важно: Преобразуем в хост-порядок ПЕРЕД любым доступом к полям тела или длине из заголовка
+            message_to_host_byte_order(msg_resp); 
             uint16_t msg_num_resp = get_full_message_number(&msg_resp->header);
 
+            // Блокируем доступ к общему списку линков
             pthread_mutex_lock(&uvm_links_mutex);
-            if (svm_id_resp >= 0 && svm_id_resp < num_svms_in_config) {
+            if (svm_id_resp >= 0 && svm_id_resp < num_svms_in_config) { // Проверяем валидность ID
                 UvmSvmLink *link_resp = &svm_links[svm_id_resp];
-                link_resp->last_activity_time = time(NULL); // Обновляем активность
+                link_resp->last_activity_time = time(NULL); // Обновляем время последней активности
 
-                char gui_details_resp[256] = "N/A"; // Дефолт для деталей
-                char gui_bcb_field_resp[32] = "";
-                bool bcb_present_resp = false;
-                bool is_expected_reply = false;
-                bool reply_is_ok = true; // Флаг, что ответ корректен по содержанию
-                UvmLinkStatus status_before_processing_reply = link_resp->status;
+                // Переменные для формирования сообщения в GUI
+                char gui_details_for_recv[256] = "N/A";
+                char gui_bcb_for_recv[32] = "";
+                bool bcb_found_for_recv = false;
+                UvmLinkStatus status_before_processing = link_resp->status; // Сохраняем для сравнения
+                bool send_specific_event_to_gui = false; // Флаг для отправки специфичных EVENT (LAKMismatch, ControlFail)
+                char specific_event_buffer[256];       // Буфер для этих специфичных EVENT
 
-                // --- Извлечение деталей и BCB для GUI ---
+                // --- Извлечение деталей из ТЕЛА сообщения для GUI и для логики UVM ---
+                // Эта часть нужна, чтобы корректно отобразить детали в RECV и использовать их в switch ниже
                 switch(msg_resp->header.message_type) {
                     case MESSAGE_TYPE_CONFIRM_INIT:
                         if (msg_resp->header.body_length >= sizeof(ConfirmInitBody)) {
-                            ConfirmInitBody* cib_r = (ConfirmInitBody*)msg_resp->body;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", cib_r->bcb); bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "SLP=0x%02X;VDR=0x%02X;BOP1=0x%02X;BOP2=0x%02X", cib_r->slp, cib_r->vdr, cib_r->bop1, cib_r->bop2);
-                            link_resp->last_recv_bcb = cib_r->bcb;
+                            ConfirmInitBody* cib_d = (ConfirmInitBody*)msg_resp->body;
+                            snprintf(gui_bcb_for_recv, sizeof(gui_bcb_for_recv), ";BCB:0x%08X", cib_d->bcb); bcb_found_for_recv = true;
+                            snprintf(gui_details_for_recv, sizeof(gui_details_for_recv), "SLP=0x%02X;VDR=0x%02X;BOP1=0x%02X;BOP2=0x%02X", cib_d->slp, cib_d->vdr, cib_d->bop1, cib_d->bop2);
+                            link_resp->last_recv_bcb = cib_d->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA:
                         if (msg_resp->header.body_length >= sizeof(PodtverzhdenieKontrolyaBody)) {
-                            PodtverzhdenieKontrolyaBody* pkb_r = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", pkb_r->bcb); bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TK=0x%02X", pkb_r->tk);
-                            link_resp->last_recv_bcb = pkb_r->bcb;
+                            PodtverzhdenieKontrolyaBody* pkb_d = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
+                            snprintf(gui_bcb_for_recv, sizeof(gui_bcb_for_recv), ";BCB:0x%08X", pkb_d->bcb); bcb_found_for_recv = true;
+                            snprintf(gui_details_for_recv, sizeof(gui_details_for_recv), "TK=0x%02X", pkb_d->tk);
+                            link_resp->last_recv_bcb = pkb_d->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_RESULTATY_KONTROLYA:
                         if (msg_resp->header.body_length >= sizeof(RezultatyKontrolyaBody)) {
-                            RezultatyKontrolyaBody* rkb_r = (RezultatyKontrolyaBody*)msg_resp->body;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", rkb_r->bcb); bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "RSK=0x%02X;VSK=%ums", rkb_r->rsk, rkb_r->vsk);
-                            link_resp->last_recv_bcb = rkb_r->bcb;
-                            link_resp->last_control_rsk = rkb_r->rsk;
+                            RezultatyKontrolyaBody* rkb_d = (RezultatyKontrolyaBody*)msg_resp->body;
+                            snprintf(gui_bcb_for_recv, sizeof(gui_bcb_for_recv), ";BCB:0x%08X", rkb_d->bcb); bcb_found_for_recv = true;
+                            snprintf(gui_details_for_recv, sizeof(gui_details_for_recv), "RSK=0x%02X;VSK=%ums", rkb_d->rsk, rkb_d->vsk);
+                            link_resp->last_recv_bcb = rkb_d->bcb;
+                            link_resp->last_control_rsk = rkb_d->rsk; // Сохраняем RSK
                         }
                         break;
                     case MESSAGE_TYPE_SOSTOYANIE_LINII:
                         if (msg_resp->header.body_length >= sizeof(SostoyanieLiniiBody)) {
-                            SostoyanieLiniiBody* slb_r = (SostoyanieLiniiBody*)msg_resp->body;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", slb_r->bcb); bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "KLA=%u;SLA=%u;KSA=%u", slb_r->kla, slb_r->sla, slb_r->ksa);
-                            link_resp->last_recv_bcb = slb_r->bcb;
+                            SostoyanieLiniiBody* slb_d = (SostoyanieLiniiBody*)msg_resp->body;
+                            snprintf(gui_bcb_for_recv, sizeof(gui_bcb_for_recv), ";BCB:0x%08X", slb_d->bcb); bcb_found_for_recv = true;
+                            snprintf(gui_details_for_recv, sizeof(gui_details_for_recv), "KLA=%u;SLA=%u;KSA=%u", slb_d->kla, slb_d->sla, slb_d->ksa);
+                            link_resp->last_recv_bcb = slb_d->bcb;
                         }
                         break;
                     case MESSAGE_TYPE_PREDUPREZHDENIE:
                         if (msg_resp->header.body_length >= sizeof(PreduprezhdenieBody)) {
-                            PreduprezhdenieBody* warn_b_r = (PreduprezhdenieBody*)msg_resp->body;
-                            snprintf(gui_bcb_field_resp, sizeof(gui_bcb_field_resp), ";BCB:0x%08X", warn_b_r->bcb); bcb_present_resp = true;
-                            snprintf(gui_details_resp, sizeof(gui_details_resp), "TKS=%u", warn_b_r->tks);
-                            link_resp->last_recv_bcb = warn_b_r->bcb;
+                            PreduprezhdenieBody* warn_b_d = (PreduprezhdenieBody*)msg_resp->body;
+                            snprintf(gui_bcb_for_recv, sizeof(gui_bcb_for_recv), ";BCB:0x%08X", warn_b_d->bcb); bcb_found_for_recv = true;
+                            snprintf(gui_details_for_recv, sizeof(gui_details_for_recv), "TKS=%u", warn_b_d->tks);
+                            link_resp->last_recv_bcb = warn_b_d->bcb;
                         }
                         break;
-                    default: // Для СУБК, КО и т.д. - пока без деталей
-                        strcpy(gui_details_resp, "Data msg");
+                    default: // Для других типов (СУБК, КО и т.д.)
+                        strcpy(gui_details_for_recv, "Data/Unknown");
                         break;
                 }
-                // Отправляем RECV в GUI
+
+                // --- Отправка RECV сообщения в GUI ---
                 snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
                          "RECV;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X%s;Details:%s",
                          svm_id_resp, msg_resp->header.message_type, msg_num_resp,
-                         msg_resp->header.address,
-                         bcb_present_resp ? gui_bcb_field_resp : "", gui_details_resp);
+                         msg_resp->header.address, // LAK SVM из заголовка
+                         bcb_found_for_recv ? gui_bcb_for_recv : "",
+                         gui_details_for_recv);
                 send_to_gui_socket(gui_buffer_main_loop);
 
                 // --- Логика машины состояний подготовки ---
-                switch (link_resp->prep_state) {
-                    case PREP_STATE_AWAITING_CONFIRM_INIT:
-                        if (msg_resp->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
-                            is_expected_reply = true;
-                            ConfirmInitBody* ci_b_main = (ConfirmInitBody*)msg_resp->body;
-                            if (ci_b_main->lak != link_resp->assigned_lak) {
-                                fprintf(stderr, "UVM Main (SVM %d): LAK Mismatch в ConfirmInit! Expected 0x%02X, got 0x%02X\n", svm_id_resp, link_resp->assigned_lak, ci_b_main->lak);
-                                reply_is_ok = false; link_resp->lak_mismatch_detected = true;
-                                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X,Msg=ConfirmInit", svm_id_resp, link_resp->assigned_lak, ci_b_main->lak);
-                                send_to_gui_socket(gui_buffer_main_loop);
-                            }
-                            if (reply_is_ok) {
-                                link_resp->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Готов к отправке "Провести контроль"
+                bool reply_ok_for_state_transition = true; // По умолчанию считаем ответ достаточным для перехода
+
+                // Обрабатываем только если линк еще не в FAILED или COMPLETE на этапе подготовки
+                if (link_resp->prep_state != PREP_STATE_FAILED && link_resp->prep_state != PREP_STATE_PREPARATION_COMPLETE) {
+                    switch (link_resp->prep_state) {
+                        case PREP_STATE_AWAITING_CONFIRM_INIT_REPLY:
+                            if (msg_resp->header.message_type == MESSAGE_TYPE_CONFIRM_INIT) {
+                                ConfirmInitBody* ci_body_recv = (ConfirmInitBody*)msg_resp->body;
+                                printf("UVM Main (SVM %d): Обработка ответа 'Подтверждение инициализации'.\n", svm_id_resp);
+                                if (ci_body_recv->lak != link_resp->assigned_lak) {
+                                    fprintf(stderr, "UVM Main (SVM %d): LAK Mismatch в ConfirmInit! Expected 0x%02X, got 0x%02X\n", svm_id_resp, link_resp->assigned_lak, ci_body_recv->lak);
+                                    reply_ok_for_state_transition = false;
+                                    link_resp->lak_mismatch_detected = true;
+                                    snprintf(specific_event_buffer, sizeof(specific_event_buffer), "EVENT;SVM_ID:%d;Type:LAKMismatch;Details:Expected=0x%02X,Got=0x%02X,Msg=ConfirmInit", svm_id_resp, link_resp->assigned_lak, ci_body_recv->lak);
+                                    send_specific_event_to_gui = true;
+                                }
+                                if (reply_ok_for_state_transition) {
+                                    link_resp->prep_state = PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL;
+                                    link_resp->current_preparation_msg_num++;
+                                }
+                            } // else если тип не тот - будет обработано ниже как "неожиданный"
+                            break;
+
+                        case PREP_STATE_AWAITING_PODTV_KONTROL_REPLY:
+                            if (msg_resp->header.message_type == MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
+                                // PodtverzhdenieKontrolyaBody* pkb_recv = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
+                                printf("UVM Main (SVM %d): Обработка ответа 'Подтверждение контроля'.\n", svm_id_resp);
+                                // (Доп. проверки, если нужны, например, LAK в теле pkb_recv->lak == link_resp->assigned_lak)
+                                link_resp->prep_state = PREP_STATE_READY_TO_SEND_VYDAT_REZ;
                                 link_resp->current_preparation_msg_num++;
-                                printf("UVM Main (SVM %d): ConfirmInit OK. Переход в ожидание Подтверждения Контроля (для отправки Пров.Контр).\n", svm_id_resp);
                             }
-                        }
-                        break;
-                    case PREP_STATE_AWAITING_CONFIRM_KONTROL: // Ожидаем Подтверждение Контроля
-                        if (msg_resp->header.message_type == MESSAGE_TYPE_PODTVERZHDENIE_KONTROLYA) {
-                            is_expected_reply = true;
-                            // PodtverzhdenieKontrolyaBody* pkb_main = (PodtverzhdenieKontrolyaBody*)msg_resp->body;
-                            // (проверка LAK и TK, если необходимо)
-                            link_resp->prep_state = PREP_STATE_AWAITING_RESULTS_KONTROL; // Готов к отправке "Выдать результаты"
-                            link_resp->current_preparation_msg_num++;
-                            printf("UVM Main (SVM %d): PodtverzhdenieKontrolya OK. Переход в ожидание Результатов Контроля (для отправки Выд.Рез.).\n", svm_id_resp);
-                        }
-                        break;
-                    case PREP_STATE_AWAITING_RESULTS_KONTROL: // Ожидаем Результаты Контроля
-                        if (msg_resp->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
-                            is_expected_reply = true;
-                            RezultatyKontrolyaBody* rkb_main = (RezultatyKontrolyaBody*)msg_resp->body;
-                            if (rkb_main->rsk != 0x3F) {
-                                fprintf(stderr, "UVM Main (SVM %d): ПРЕДУПРЕЖДЕНИЕ! Ошибка контроля RSK=0x%02X в 'Результаты контроля'.\n", svm_id_resp, rkb_main->rsk);
-                                link_resp->control_failure_detected = true;
-                                link_resp->last_control_rsk = rkb_main->rsk;
-                                if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING; // Устанавливаем Warning
-                                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X", svm_id_resp, rkb_main->rsk);
-                                send_to_gui_socket(gui_buffer_main_loop);
-                            } else {
-                                if(link_resp->control_failure_detected) link_resp->control_failure_detected = false; // Сбрасываем, если был
+                            break;
+
+                        case PREP_STATE_AWAITING_REZ_KONTROL_REPLY:
+                            if (msg_resp->header.message_type == MESSAGE_TYPE_RESULTATY_KONTROLYA) {
+                                RezultatyKontrolyaBody* rkb_recv = (RezultatyKontrolyaBody*)msg_resp->body;
+                                printf("UVM Main (SVM %d): Обработка ответа 'Результаты контроля'. RSK=0x%02X\n", svm_id_resp, rkb_recv->rsk);
+                                if (rkb_recv->rsk != 0x3F) { // 0x3F - код "ОК"
+                                    // Не ставим reply_ok_for_state_transition = false, так как ответ все же пришел.
+                                    // Но фиксируем ошибку контроля и меняем статус UVM_LINK на WARNING.
+                                    link_resp->control_failure_detected = true;
+                                    // link_resp->last_control_rsk уже установлен при извлечении деталей
+                                    if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING;
+                                    snprintf(specific_event_buffer, sizeof(specific_event_buffer), "EVENT;SVM_ID:%d;Type:ControlFail;Details:RSK=0x%02X", svm_id_resp, rkb_recv->rsk);
+                                    send_specific_event_to_gui = true;
+                                } else {
+                                    if(link_resp->control_failure_detected) link_resp->control_failure_detected = false;
+                                }
+                                link_resp->prep_state = PREP_STATE_READY_TO_SEND_VYDAT_SOST;
+                                link_resp->current_preparation_msg_num++;
                             }
-                            link_resp->prep_state = PREP_STATE_AWAITING_LINE_STATUS; // Готов к отправке "Выдать состояние линии"
-                            link_resp->current_preparation_msg_num++;
-                            printf("UVM Main (SVM %d): RezultatyKontrolya обработаны. Переход в ожидание Состояния Линии (для отправки Выд.Сост.).\n", svm_id_resp);
-                        }
-                        break;
-                    case PREP_STATE_AWAITING_LINE_STATUS: // Ожидаем Состояние Линии
-                        if (msg_resp->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
-                            is_expected_reply = true;
-                            link_resp->prep_state = PREP_STATE_PREPARATION_COMPLETE;
-                            link_resp->current_preparation_msg_num++; // Это был последний номер для этапа подготовки
-                            printf("UVM Main (SVM %d): SostoyanieLinii OK. Этап 'Подготовка к сеансу наблюдения' ЗАВЕРШЕН.\n", svm_id_resp);
-                        }
-                        break;
-                    default: // Сообщение пришло, когда мы не ждали ответа этапа подготовки или уже завершили/ошибка
-                        break; 
-                }
+                            break;
 
-                if (is_expected_reply && !reply_is_ok) { // Если ожидали, но ответ плохой
-                    link_resp->prep_state = PREP_STATE_FAILED;
-                    link_resp->status = UVM_LINK_FAILED;
-                }
+                        case PREP_STATE_AWAITING_LINE_STATUS_REPLY:
+                            if (msg_resp->header.message_type == MESSAGE_TYPE_SOSTOYANIE_LINII) {
+                                // SostoyanieLiniiBody* slb_recv = (SostoyanieLiniiBody*)msg_resp->body;
+                                printf("UVM Main (SVM %d): Обработка ответа 'Состояние линии'.\n", svm_id_resp);
+                                link_resp->prep_state = PREP_STATE_PREPARATION_COMPLETE;
+                                link_resp->current_preparation_msg_num++; // Этот номер уже для команд этапа съемки
+                                printf("UVM Main (SVM %d): Этап 'Подготовка к сеансу наблюдения' ЗАВЕРШЕН (prep_state=%d).\n", svm_id_resp, link_resp->prep_state);
+                            }
+                            break;
+                        default:
+                            // Если мы не в состоянии ожидания ответа подготовки, значит это асинхронное сообщение
+                            // или сообщение этапа съемки (если он уже начался для этого SVM)
+                            is_expected_reply = false; // Помечаем, что это не ожидаемый ответ на команду подготовки
+                            break;
+                    } // конец switch (link_resp->prep_state)
 
-                // Обработка асинхронного "Предупреждения" в любом состоянии
+                    if (is_expected_reply && !reply_ok_for_state_transition) { // Если ждали ответ подготовки, но он был плохой
+                        link_resp->prep_state = PREP_STATE_FAILED;
+                        link_resp->status = UVM_LINK_FAILED;
+                    }
+                } // if prep_state not FAILED or COMPLETE
+
+                // Обработка "Предупреждения" как асинхронного сообщения (может прийти в любом состоянии)
                 if (msg_resp->header.message_type == MESSAGE_TYPE_PREDUPREZHDENIE) {
-                    PreduprezhdenieBody *warn_b_main = (PreduprezhdenieBody*)msg_resp->body;
-                    fprintf(stderr, "UVM Main (SVM %d): Получено асинхронное ПРЕДУПРЕЖДЕНИЕ TKS=%u.\n", svm_id_resp, warn_b_main->tks);
-                    link_resp->last_warning_tks = warn_b_main->tks;
+                    PreduprezhdenieBody *warn_b_main_recv = (PreduprezhdenieBody*)msg_resp->body;
+                    fprintf(stderr, "UVM Main (SVM %d): Получено ПРЕДУПРЕЖДЕНИЕ TKS=%u.\n", svm_id_resp, warn_b_main_recv->tks);
+                    link_resp->last_warning_tks = warn_b_main_recv->tks;
                     link_resp->last_warning_time = time(NULL);
                     if(link_resp->status == UVM_LINK_ACTIVE) link_resp->status = UVM_LINK_WARNING;
-                    snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u", svm_id_resp, warn_b_main->tks);
-                    send_to_gui_socket(gui_buffer_main_loop);
+                    snprintf(specific_event_buffer, sizeof(specific_event_buffer), "EVENT;SVM_ID:%d;Type:Warning;Details:TKS=%u", svm_id_resp, warn_b_main_recv->tks);
+                    send_specific_event_to_gui = true; // Ставим флаг, чтобы отправить после RECV
+                }
+                
+                // Отправляем специфичный EVENT, если был установлен флаг
+                if (send_specific_event_to_gui) {
+                    send_to_gui_socket(specific_event_buffer);
                 }
 
-                // Отправляем событие об изменении статуса, если он изменился
-                if (link_resp->status != status_before_processing_reply) {
+                // Отправляем событие об изменении общего статуса линка, если он изменился
+                if (link_resp->status != status_before_processing) {
                      snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop),
                              "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X",
                              svm_id_resp, link_resp->status, link_resp->assigned_lak);

@@ -64,16 +64,21 @@ typedef enum {
 } UvmLinkStatus;
 
 typedef enum {
-    PREP_STATE_NOT_STARTED,             // Начальное состояние или после ошибки
-    PREP_STATE_CONNECTING,              // UVM пытается установить TCP соединение (это уже есть в UvmLinkStatus)
-                                        // Будем считать, что если UvmLinkStatus == UVM_LINK_ACTIVE, то TCP есть.
-                                        // PREP_STATE_NOT_STARTED будет начальным после успешного TCP-соединения.
-    PREP_STATE_AWAITING_CONFIRM_INIT,
-    PREP_STATE_AWAITING_CONFIRM_KONTROL,
-    PREP_STATE_AWAITING_RESULTS_KONTROL,
-    PREP_STATE_AWAITING_LINE_STATUS,
-    PREP_STATE_PREPARATION_COMPLETE,      // Этап подготовки завершен, готов к параметрам съемки
-    PREP_STATE_FAILED                     // Ошибка на этапе подготовки
+    PREP_STATE_NOT_STARTED,                 // Начало
+    PREP_STATE_READY_TO_SEND_INIT_CHANNEL,  // <--- НОВОЕ (или можно совместить с NOT_STARTED)
+    PREP_STATE_AWAITING_CONFIRM_INIT_REPLY, // Ожидаем ответ на InitChannel
+
+    PREP_STATE_READY_TO_SEND_PROVESTI_KONTROL,
+    PREP_STATE_AWAITING_PODTV_KONTROL_REPLY, // Ожидаем ответ на ProvestiKontrol
+
+    PREP_STATE_READY_TO_SEND_VYDAT_REZ,
+    PREP_STATE_AWAITING_REZ_KONTROL_REPLY,   // Ожидаем ответ на VydatRezultaty
+
+    PREP_STATE_READY_TO_SEND_VYDAT_SOST,
+    PREP_STATE_AWAITING_LINE_STATUS_REPLY,   // Ожидаем ответ на VydatSostoyanie
+
+    PREP_STATE_PREPARATION_COMPLETE,
+    PREP_STATE_FAILED
 } PreparationState;
 
 // Структура для хранения состояния связи с одним SVM
