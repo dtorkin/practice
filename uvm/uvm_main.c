@@ -1051,7 +1051,7 @@ int main(int argc, char *argv[]) {
                 if (link_ka->connection_handle >= 0) {
                     shutdown(link_ka->connection_handle, SHUT_RDWR); // Пытаемся уведомить receiver
                 }
-                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity for %ld sec", ka_idx, config.uvm_keepalive_timeout_sec);
+                snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:KeepAliveTimeout;Details:No activity for %d sec", ka_idx, config.uvm_keepalive_timeout_sec);
                 send_to_gui_socket(gui_buffer_main_loop);
                 snprintf(gui_buffer_main_loop, sizeof(gui_buffer_main_loop), "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X", ka_idx, UVM_LINK_FAILED, link_ka->assigned_lak);
                 send_to_gui_socket(gui_buffer_main_loop);
