@@ -63,6 +63,19 @@ typedef enum {
     UVM_LINK_WARNING // Для некритичных проблем
 } UvmLinkStatus;
 
+typedef enum {
+    PREP_STATE_NOT_STARTED,             // Начальное состояние или после ошибки
+    PREP_STATE_CONNECTING,              // UVM пытается установить TCP соединение (это уже есть в UvmLinkStatus)
+                                        // Будем считать, что если UvmLinkStatus == UVM_LINK_ACTIVE, то TCP есть.
+                                        // PREP_STATE_NOT_STARTED будет начальным после успешного TCP-соединения.
+    PREP_STATE_AWAITING_CONFIRM_INIT,
+    PREP_STATE_AWAITING_CONFIRM_KONTROL,
+    PREP_STATE_AWAITING_RESULTS_KONTROL,
+    PREP_STATE_AWAITING_LINE_STATUS,
+    PREP_STATE_PREPARATION_COMPLETE,      // Этап подготовки завершен, готов к параметрам съемки
+    PREP_STATE_FAILED                     // Ошибка на этапе подготовки
+} PreparationState;
+
 // Структура для хранения состояния связи с одним SVM
 typedef struct UvmSvmLink {
     int id;                 // ID этого слота (0..MAX_SVM_INSTANCES-1)
@@ -105,17 +118,5 @@ typedef struct UvmSvmLink {
     bool        control_failure_detected; // Был ли RSK != ожидаемого "ОК"
 } UvmSvmLink;
 
-typedef enum {
-    PREP_STATE_NOT_STARTED,             // Начальное состояние или после ошибки
-    PREP_STATE_CONNECTING,              // UVM пытается установить TCP соединение (это уже есть в UvmLinkStatus)
-                                        // Будем считать, что если UvmLinkStatus == UVM_LINK_ACTIVE, то TCP есть.
-                                        // PREP_STATE_NOT_STARTED будет начальным после успешного TCP-соединения.
-    PREP_STATE_AWAITING_CONFIRM_INIT,
-    PREP_STATE_AWAITING_CONFIRM_KONTROL,
-    PREP_STATE_AWAITING_RESULTS_KONTROL,
-    PREP_STATE_AWAITING_LINE_STATUS,
-    PREP_STATE_PREPARATION_COMPLETE,      // Этап подготовки завершен, готов к параметрам съемки
-    PREP_STATE_FAILED                     // Ошибка на этапе подготовки
-} PreparationState;
 
 #endif // UVM_TYPES_H
