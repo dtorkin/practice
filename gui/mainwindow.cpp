@@ -91,7 +91,7 @@ void MainWindow::initTableWidget(QTableWidget* table) {
 
 void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, const QString &directionOrEventType,
                                    int msgType, const QString &msgName, int msgNum,
-                                   int assignedLak, // Назовите одинаково с .h
+                                   int lakInIPCMessage, // Назовите одинаково с .h
                                    quint32 bcb,       // <--- ИЗМЕНИТЕ ЗДЕСЬ ИМЯ АРГУМЕНТА НА "bcb"
                                    const QString &details)
 {
