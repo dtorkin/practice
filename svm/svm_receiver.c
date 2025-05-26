@@ -18,9 +18,12 @@
 #include "svm_types.h"  // Для SvmInstance, QueuedMessage
 #include <stdbool.h>
 
-// Внешние переменные (глобальный флаг остановки)
-extern volatile bool global_timer_keep_running; // Используем как основной флаг keep_running
-extern pthread_mutex_t svm_instances_mutex; // Для изменения is_active
+// Внешняя переменная (общий флаг работы svm_app)
+// extern volatile bool global_timer_keep_running; // Если вы переименовали в svm_main.c
+extern volatile bool keep_running; // Используем имя из svm_main.c
+
+// extern pthread_mutex_t svm_instances_mutex; // Это было для глобального мьютекса,
+                                             // который мы решили не использовать для is_active
 
 void* receiver_thread_func(void* arg) {
     SvmInstance *instance = (SvmInstance*)arg;
@@ -29,71 +32,75 @@ void* receiver_thread_func(void* arg) {
          return NULL;
     }
 
-    printf("SVM Receiver thread started for instance %d (handle: %d).\n", instance->id, instance->client_handle);
-    Message receivedMessage; // Буфер для сообщения от io_common
-    QueuedMessage q_msg;     // Структура для помещения в очередь
+    printf("SVM Receiver thread started for instance %d (LAK 0x%02X, handle: %d).\n",
+           instance->id, instance->assigned_lak, instance->client_handle);
+    Message receivedMessage;
+    QueuedMessage q_msg;
     q_msg.instance_id = instance->id;
-    bool should_stop_instance = false; // Локальный флаг для выхода из цикла этого потока
+    // bool should_stop_instance_locally = false; // Переименуем для ясности
 
-    while (global_timer_keep_running && instance->is_active) { // Проверяем глобальный флаг и активность экземпляра
-        // Используем io_handle и client_handle из структуры экземпляра
+    // Используем instance->is_active (который управляется listener'ом)
+    // и глобальный keep_running
+    while (keep_running && instance->is_active) {
         int recvStatus = receive_protocol_message(instance->io_handle, instance->client_handle, &receivedMessage);
 
-        if (recvStatus == -1) { // Ошибка чтения
-            if(global_timer_keep_running && instance->is_active) { // Логируем только если еще работаем
-                perror("Receiver Thread (Inst %d): receive_protocol_message error");
-                fprintf(stderr, "Receiver Thread (Inst %d): Stopping instance due to receive error.\n", instance->id);
-            }
-            should_stop_instance = true;
-        } else if (recvStatus == 1) { // Соединение закрыто удаленно
-            if(global_timer_keep_running && instance->is_active) {
-               printf("Receiver Thread (Inst %d): Connection closed by UVM. Stopping instance.\n", instance->id);
-            }
-            should_stop_instance = true;
-        } else if (recvStatus == -2) { // Таймаут или прерывание (EINTR)
-             // Проверяем флаги еще раз, если EINTR был из-за сигнала завершения
-             if (!global_timer_keep_running || !instance->is_active) {
-                 should_stop_instance = true;
-             } else {
-                 usleep(10000); // Небольшая пауза перед повторной попыткой
-                 continue;
-             }
-        } else { // recvStatus == 0 - Успешное получение
-            // Копируем полученное сообщение в структуру для очереди
-            memcpy(&q_msg.message, &receivedMessage, sizeof(Message)); // Простое копирование
+        // Проверяем состояние instance->is_active СРАЗУ после блокирующего вызова,
+        // так как listener мог изменить его во время нашего ожидания на recv.
+        // Это предотвратит обработку сообщения, если экземпляр уже деактивирован.
+        // Однако, instance_mutex здесь брать не очень хорошо, т.к. listener его держит при деактивации.
+        // Лучше положиться на то, что listener закроет сокет, и recvStatus будет != 0.
 
-            // Помещаем сообщение во ВХОДЯЩУЮ очередь ЭТОГО экземпляра
-            if (!qmq_enqueue(instance->incoming_queue, &q_msg)) {
-                 if (global_timer_keep_running && instance->is_active) {
-                    fprintf(stderr, "Receiver Thread (Inst %d): Failed to enqueue message to instance incoming queue (maybe shutdown?). Stopping instance.\n", instance->id);
-                 }
-                 should_stop_instance = true; // Считаем ошибкой и завершаемся
-            }
-             //else {
-             //    printf("Receiver (Inst %d): Enqueued msg type %u\n", instance->id, q_msg.message.header.message_type);
-             //}
+        if (!keep_running || !instance->is_active) { // Проверяем флаги еще раз
+            // printf("Receiver Thread (Inst %d): Shutdown signaled or instance deactivated during/after receive. Exiting.\n", instance->id);
+            break;
         }
 
-        // Если нужно остановить этот экземпляр
-        if(should_stop_instance) {
-            // Помечаем экземпляр как неактивный (под глобальным мьютексом)
-            pthread_mutex_lock(&svm_instances_mutex);
-            if (instance->is_active) { // Доп. проверка, если другой поток уже остановил
-                instance->is_active = false;
-                printf("Receiver Thread (Inst %d): Marked instance as inactive.\n", instance->id);
-                // Закрываем хэндл здесь не нужно, это сделает main при очистке или sender при ошибке отправки
+        if (recvStatus == 0) { // Успешное получение сообщения
+            memcpy(&q_msg.message, &receivedMessage, sizeof(Message));
+            if (!qmq_enqueue(instance->incoming_queue, &q_msg)) {
+                 if (keep_running && instance->is_active) { // Логируем, только если еще должны работать
+                    fprintf(stderr, "Receiver Thread (Inst %d): Failed to enqueue message to instance incoming queue. Stopping instance.\n", instance->id);
+                 }
+                 // Listener должен будет сам закрыть сокет и пометить is_active = false
+                 // Здесь мы просто завершаем поток, сигнализируя процессору.
+                 break; 
             }
-            pthread_mutex_unlock(&svm_instances_mutex);
-
-            // Сигнализируем процессору этого экземпляра, что новых сообщений не будет
-            if (instance->incoming_queue) {
-                printf("Receiver Thread (Inst %d): Shutting down incoming queue.\n", instance->id);
-                qmq_shutdown(instance->incoming_queue);
+        } else if (recvStatus == 1) { // Соединение закрыто удаленно
+            if(keep_running && instance->is_active) {
+               printf("Receiver Thread (Inst %d): Connection closed by UVM. Stopping instance processing.\n", instance->id);
             }
-            break; // Выходим из while
+            break; 
+        } else if (recvStatus == -1) { // Ошибка чтения (не таймаут/EINTR)
+            if(keep_running && instance->is_active) {
+                // perror("Receiver Thread (Inst %d): receive_protocol_message error");
+                fprintf(stderr, "Receiver Thread (Inst %d): Receive error %d (%s). Stopping instance processing.\n", instance->id, errno, strerror(errno));
+            }
+            break; 
+        } else if (recvStatus == -2) { // Таймаут или EINTR из receive_protocol_message
+             // EINTR уже должен обрабатываться внутри receive_protocol_message,
+             // но если он просачивается, или это наш кастомный таймаут poll'а.
+             // Просто продолжаем цикл, чтобы снова проверить keep_running и is_active.
+             usleep(10000); // Небольшая пауза, чтобы не забивать CPU
+             continue;
         }
 	} // end while
 
-    printf("SVM Receiver thread finished for instance %d.\n", instance->id);
+    // Когда выходим из цикла, нужно сигнализировать процессору, что новых сообщений не будет.
+    // Это делается путем закрытия входящей очереди экземпляра.
+    // Также нужно сообщить listener'у, что экземпляр больше не активен, чтобы он мог очистить ресурсы.
+    // Это лучше делать в listener'е, который ждет этот поток.
+    // Здесь мы просто сигнализируем процессору.
+
+    printf("SVM Receiver thread (Inst %d, LAK 0x%02X): Shutting down incoming queue and finishing.\n", instance->id, instance->assigned_lak);
+    if (instance->incoming_queue) {
+        qmq_shutdown(instance->incoming_queue); // Сигнализируем процессору
+    }
+
+    // Listener должен будет изменить instance->is_active = false;
+    // pthread_mutex_lock(&instance->instance_mutex); // Неправильно, это может привести к дедлоку с listener
+    // instance->is_active = false;
+    // pthread_mutex_unlock(&instance->instance_mutex);
+
+    printf("SVM Receiver thread finished for instance %d (LAK 0x%02X).\n", instance->id, instance->assigned_lak);
     return NULL;
 }
