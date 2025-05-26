@@ -658,6 +658,7 @@ int main(int argc, char *argv[]) {
                         // Переводим в соответствующее состояние ОЖИДАНИЯ ответа
                         if (sent_command_type_for_state_change == MESSAGE_TYPE_INIT_CHANNEL) {
                             link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT;
+							printf("UVM Main (SVM %d): Состояние изменено на PREP_STATE_AWAITING_CONFIRM_INIT (%d).\n", i, link->prep_state); // <-- ОТЛАДКА
                         } else if (sent_command_type_for_state_change == MESSAGE_TYPE_PROVESTI_KONTROL) {
                             link->prep_state = PREP_STATE_AWAITING_CONFIRM_KONTROL; // Ожидаем Подтверждение Контроля
                         } else if (sent_command_type_for_state_change == MESSAGE_TYPE_VYDAT_RESULTATY_KONTROLYA) {

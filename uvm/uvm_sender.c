@@ -32,6 +32,7 @@ void* uvm_sender_thread_func(void* arg) {
     while (!shutdown_req_received) {
         // Извлекаем запрос из очереди
         if (!queue_req_dequeue(uvm_outgoing_request_queue, &request)) {
+			printf("UVM Sender: Забрал из очереди запрос для SVM %d, тип сообщения %d.\n", request.target_svm_id, request.message.header.message_type); // <-- ОТЛАДКА
             if (!uvm_keep_running && uvm_outgoing_request_queue->count == 0) {
                 printf("Sender Thread: Request queue empty and shutdown signaled. Exiting.\n");
                 break;
@@ -65,6 +66,7 @@ void* uvm_sender_thread_func(void* arg) {
             if (is_active && io && handle >= 0) {
                 // Отправляем сообщение
                 if (send_protocol_message(io, handle, &request.message) != 0) {
+					fprintf(stderr, "UVM Sender: ОШИБКА отправки сообщения тип %u SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
                     fprintf(stderr, "Sender Thread: Error sending message (type %u) to SVM ID %d (handle %d).\n",
                            request.message.header.message_type, svm_id, handle);
                     // Ошибка отправки - помечаем линк как неактивный
@@ -82,7 +84,7 @@ void* uvm_sender_thread_func(void* arg) {
                     }
                     pthread_mutex_unlock(&uvm_links_mutex);
                 } else {
-                     // printf("Sender Thread: Message (type %u) sent to SVM ID %d.\n", request.message.header.message_type, svm_id);
+                     printf("UVM Sender: Сообщение тип %u УСПЕШНО отправлено SVM %d.\n", request.message.header.message_type, svm_id); // <-- ОТЛАДКА
                 }
             } else {
                  fprintf(stderr, "Sender Thread: Cannot send message to SVM ID %d (inactive or invalid).\n", svm_id);
