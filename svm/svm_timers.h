@@ -25,51 +25,17 @@
 // (Определены в svm_timers.c)
 extern pthread_mutex_t svm_timer_management_mutex; // Мьютекс для управления запуском/остановкой таймера
 extern pthread_cond_t svm_timer_cond;              // Условная переменная для пробуждения/остановки таймера
-extern volatile bool global_timer_keep_running;    // Глобальный флаг для основного цикла таймера
+extern volatile bool keep_running;
 
-/**
- * @brief Инициализирует глобальный мьютекс и условную переменную для таймера.
- * Также инициализирует генератор случайных чисел.
- * @return 0 при успехе, -1 при ошибке.
- */
-int init_svm_timer_sync(void);
+// Прототип новой функции потока для персонального таймера
+void* svm_instance_timer_thread_func(void* arg);
 
-/**
- * @brief Уничтожает глобальный мьютекс и условную переменную таймера.
- */
-void destroy_svm_timer_sync(void);
+// Функции для инициализации/уничтожения общих ресурсов (если нужны, например, srand)
+int init_svm_app_wide_resources(void); // Переименовано
+void destroy_svm_app_wide_resources(void); // Переименовано
 
-/**
- * @brief Функция потока таймера SVM.
- * Периодически обновляет счетчики BCB и линии для ВСЕХ активных экземпляров SVM.
- * Защищает доступ к счетчикам экземпляров с помощью их собственных мьютексов.
- * Ожидает с использованием pthread_cond_timedwait на глобальной cond var.
- * @param arg Указатель на массив SvmInstance[MAX_SVM_INSTANCES].
- * @return NULL.
- */
-void* timer_thread_func(void* arg);
-
-
-/**
- * @brief Устанавливает глобальный флаг завершения и сигнализирует потоку таймера.
- * Эта функция потокобезопасна.
- */
-void stop_timer_thread_signal(void);
-
-/**
- * @brief Получает текущее значение счетчика BCB для конкретного экземпляра (потокобезопасно).
- * @param instance Указатель на экземпляр SVM.
- * @return Текущее значение BCB.
- */
+// Функции доступа к счетчикам остаются
 uint32_t get_instance_bcb_counter(SvmInstance *instance);
-
-/**
- * @brief Получает текущие значения счетчиков состояния линии для конкретного экземпляра (потокобезопасно).
- * @param instance Указатель на экземпляр SVM.
- * @param kla Указатель для записи значения KLA (может быть NULL).
- * @param sla_us100 Указатель для записи значения SLA в 1/100 мкс (может быть NULL).
- * @param ksa Указатель для записи значения KSA (может быть NULL).
- */
 void get_instance_line_status_counters(SvmInstance *instance, uint16_t *kla, uint32_t *sla_us100, uint16_t *ksa);
 
 #endif // SVM_TIMERS_H

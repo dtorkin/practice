@@ -27,6 +27,7 @@ typedef struct SvmInstance {
     int id;
     pthread_t receiver_tid;
     pthread_t processor_tid;
+    pthread_t timer_tid; // <--- НОВОЕ ПОЛЕ для ID персонального таймер-потока
     IOInterface *io_handle; // Указатель на IO интерфейс listener'а этого экземпляра
     int client_handle;
     bool is_active;
@@ -44,6 +45,9 @@ typedef struct SvmInstance {
     int link_status_timer_counter;
 
     pthread_mutex_t instance_mutex;
+	
+    // --- Флаг для управления персональным таймером ---
+    volatile bool personal_timer_keep_running; // <--- НОВЫЙ ФЛАГ
 
     // --- ПОЛЯ ДЛЯ ИМИТАЦИИ СБОЕВ ---
 	bool user_flag1; // Для кастомной логики сбоев (например, прекратить отвечать)
