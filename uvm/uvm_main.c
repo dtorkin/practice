@@ -124,43 +124,41 @@ bool send_uvm_request(UvmRequest *request) {
            request->target_svm_id, request->message.header.message_type, request->type);
 
     if (request->type == UVM_REQ_SEND_MESSAGE) {
-        printf("send_uvm_request: Тип UVM запроса UVM_REQ_SEND_MESSAGE. Проверка линка...\n");
-        pthread_mutex_lock(&uvm_links_mutex);
-        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
-            UvmSvmLink *link = &svm_links[request->target_svm_id];
-            printf("send_uvm_request: Статус линка для SVM %d: %d (Ожидаем UVM_LINK_ACTIVE = %d).\n",
-                   request->target_svm_id, link->status, UVM_LINK_ACTIVE); // <-- ОТЛАДКА СТАТУСА
+        printf("send_uvm_request: Тип UVM запроса UVM_REQ_SEND_MESSAGE. Проверка линка (мьютекс должен быть уже взят вызывающим!)...\n"); // ИЗМЕНЕН КОММЕНТАРИЙ
+        // pthread_mutex_lock(&uvm_links_mutex); // <--- УБРАТЬ ЭТУ СТРОКУ
 
-            if (link->status == UVM_LINK_ACTIVE) {
+        if (request->target_svm_id >= 0 && request->target_svm_id < MAX_SVM_INSTANCES) {
+            UvmSvmLink *link = &svm_links[request->target_svm_id]; // ДОСТУП К svm_links ТЕПЕРЬ НЕ ЗАЩИЩЕН ЗДЕСЬ!
+            printf("send_uvm_request: Статус линка для SVM %d: %d (Ожидаем UVM_LINK_ACTIVE = %d).\n",
+                   request->target_svm_id, link->status, UVM_LINK_ACTIVE);
+
+            if (link->status == UVM_LINK_ACTIVE) { // Проверяем статус ПОСЛЕ получения указателя на link
                 link->last_sent_msg_type = request->message.header.message_type;
                 link->last_sent_msg_num = get_full_message_number(&request->message.header);
                 link->last_sent_msg_time = time(NULL);
 
+                // Отправка в GUI должна быть безопасной относительно gui_socket_mutex,
+                // который независим от uvm_links_mutex.
                 snprintf(gui_msg_buffer, sizeof(gui_msg_buffer),
                          "SENT;SVM_ID:%d;Type:%d;Num:%u;LAK:0x%02X",
-                         request->target_svm_id,
-                         request->message.header.message_type,
-                         link->last_sent_msg_num,
-                         link->assigned_lak);
-                send_to_gui_socket(gui_msg_buffer);
+                         request->target_svm_id, request->message.header.message_type,
+                         link->last_sent_msg_num, link->assigned_lak);
+                send_to_gui_socket(gui_msg_buffer); // send_to_gui_socket сама берет свой мьютекс
                 printf("send_uvm_request: SENT событие отправлено в GUI для SVM %d, тип %d.\n", request->target_svm_id, request->message.header.message_type);
             } else {
-                printf("send_uvm_request: Линк для SVM %d НЕ АКТИВЕН (статус %d), SENT в GUI не отправлен.\n", request->target_svm_id, link->status);
-                // Если линк не активен, возможно, не стоит увеличивать uvm_outstanding_sends и ставить в очередь?
-                // Это приведет к тому, что main будет думать, что команда отправлена, и перейдет в ожидание.
-                // Лучше вернуть false, чтобы main обработал это как ошибку отправки.
-                pthread_mutex_unlock(&uvm_links_mutex); // Не забываем отпустить мьютекс перед выходом
-                // Но если мы вернем false здесь, uvm_outstanding_sends не будет увеличен, и main не будет его ждать.
-                // Это может быть правильно, если команда реально не будет отправлена.
-                // Однако, если мы НЕ ставим в очередь, то uvm_outstanding_sends и не должен меняться.
-                // Давайте пока оставим логику как есть, но будем помнить об этом.
+                printf("send_uvm_request: Линк для SVM %d НЕ АКТИВЕН (статус %d), SENT в GUI не отправлен. Команда НЕ будет поставлена в очередь.\n", request->target_svm_id, link->status);
+                // pthread_mutex_unlock(&uvm_links_mutex); // <--- УБРАТЬ (если бы она была здесь)
+                // Если линк не активен, мы не должны ставить команду в очередь и не должны увеличивать uvm_outstanding_sends
+                return false; // <--- ВАЖНО: возвращаем false, чтобы main знал, что отправка не удалась
             }
         } else {
             fprintf(stderr, "send_uvm_request: ОШИБКА: невалидный target_svm_id %d.\n", request->target_svm_id);
+            // pthread_mutex_unlock(&uvm_links_mutex); // <--- УБРАТЬ (если бы она была здесь)
+            return false; // Ошибка, не ставим в очередь
         }
-        pthread_mutex_unlock(&uvm_links_mutex);
+        // pthread_mutex_unlock(&uvm_links_mutex); // <--- УБРАТЬ ЭТУ СТРОКУ
 
-        // Увеличиваем счетчик только если собираемся ставить в очередь
+        // Увеличиваем счетчик только если собираемся ставить в очередь (т.е. если дошли сюда и не было return false)
         pthread_mutex_lock(&uvm_send_counter_mutex);
         uvm_outstanding_sends++;
         pthread_mutex_unlock(&uvm_send_counter_mutex);
@@ -169,22 +167,25 @@ bool send_uvm_request(UvmRequest *request) {
         fprintf(stderr, "send_uvm_request: ВНИМАНИЕ: request->type (%d) НЕ UVM_REQ_SEND_MESSAGE. Пропуск обновления GUI и счетчика sends.\n", request->type);
     }
 
+    // Постановка в очередь
     if (!queue_req_enqueue(uvm_outgoing_request_queue, request)) {
         fprintf(stderr, "send_uvm_request: ОШИБКА: Failed to enqueue request (prot.msg type %d, target_svm_id %d)\n",
                 request->message.header.message_type, request->target_svm_id);
-        // success = false; // уже объявлен в main
         if (request->type == UVM_REQ_SEND_MESSAGE) { // Только если мы его увеличивали
              pthread_mutex_lock(&uvm_send_counter_mutex);
              if(uvm_outstanding_sends > 0) uvm_outstanding_sends--;
              printf("send_uvm_request: uvm_outstanding_sends уменьшен (ошибка enqueue) до %d.\n", uvm_outstanding_sends);
              pthread_mutex_unlock(&uvm_send_counter_mutex);
         }
-        return false; // <--- Возвращаем false при ошибке enqueue
+        return false;
     } else {
         printf("send_uvm_request: Запрос для SVM %d, тип протокольного сообщения %d УСПЕШНО помещен в очередь.\n", request->target_svm_id, request->message.header.message_type);
     }
-    return true; // <--- Возвращаем true при успехе
+    return true;
 }
+
+
+
 
 // Функция ожидания отправки всех сообщений
 void wait_for_outstanding_sends(void) {
@@ -693,7 +694,7 @@ int main(int argc, char *argv[]) {
                 } // конец switch
 
                 if (command_to_send_prepared_now) {
-                    printf("UVM Main (SVM %d): Попытка вызова send_uvm_request для команды типа %u (Num %u)...\n", i, sent_cmd_type_for_state_now, link->current_preparation_msg_num); // ИЗМЕНЕНО
+                    printf("UVM Main (SVM %d): Попытка вызова send_uvm_request для команды типа %u (Num %u)...\n", i, sent_cmd_type_for_state_now, link->current_preparation_msg_num);
                     if (send_uvm_request(&request_to_send)) {
                         link->last_command_sent_time = time(NULL);
                         link->last_sent_prep_cmd_type = sent_cmd_type_for_state_now;
