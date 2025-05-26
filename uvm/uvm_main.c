@@ -777,8 +777,6 @@ int main(int argc, char *argv[]) {
             int svm_id_resp = response_msg_data_main.source_svm_id;
             Message *msg_resp = &response_msg_data_main.message;
             
-            // Важно: Преобразуем в хост-порядок ПЕРЕД любым доступом к полям тела или длине из заголовка
-            message_to_host_byte_order(msg_resp); 
             uint16_t msg_num_resp = get_full_message_number(&msg_resp->header);
 
             // Блокируем доступ к общему списку линков
@@ -788,12 +786,11 @@ int main(int argc, char *argv[]) {
                 link_resp->last_activity_time = time(NULL); // Обновляем время последней активности
 
 				// --- Вычисление веса для RECV ---
-		uint16_t body_len_recv_host_correct = msg_resp->header.body_length; // Это УЖЕ должно быть правильное значение в хостовом порядке
-		size_t weight_recv_correct = sizeof(MessageHeader) + body_len_recv_host_correct;
-				    printf("DEBUG UVM_MAIN RECV: svm_id=%d, msg_type=%u, body_len_host=%u, calculated_weight=%zu\n",
-           svm_id_resp, msg_resp->header.message_type, body_len_recv_host_correct, weight_recv_correct); // ОТЛАДКА
-
-				// --- КОНЕЦ ---
+                // ТЕПЕРЬ msg_resp->header.body_length должно быть правильным (хостовым)
+                uint16_t body_len_recv_host_for_gui = msg_resp->header.body_length; 
+                size_t weight_recv_for_gui = sizeof(MessageHeader) + body_len_recv_host_for_gui;
+                printf("DEBUG UVM_MAIN RECV: svm_id=%d, msg_type=%u, body_len_host=%u, calculated_weight=%zu\n", 
+                       svm_id_resp, msg_resp->header.message_type, body_len_recv_host_for_gui, weight_recv_for_gui);
 
                 // Переменные для формирования сообщения в GUI
                 char gui_details_for_recv[256] = "N/A";
@@ -858,7 +855,7 @@ int main(int argc, char *argv[]) {
 						 svm_id_resp, msg_resp->header.message_type, msg_num_resp,
 						 msg_resp->header.address,
 						 bcb_found_for_recv ? gui_bcb_for_recv : "",
-						 weight_recv_correct, // <-- ПЕРЕДАЕМ ВЕС
+						 weight_recv_for_gui, // <-- ПЕРЕДАЕМ ВЕС
 						 gui_details_for_recv);
 				send_to_gui_socket(gui_buffer_main_loop);
 
