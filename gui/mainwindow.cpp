@@ -75,6 +75,7 @@ void MainWindow::initTableWidget(QTableWidget* table) {
     table->horizontalHeader()->setStretchLastSection(true); // Последний столбец (Детали) растягивается
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
+	table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     table->setWordWrap(false); // Отключаем автоперенос в ячейках для краткости
 
     // Примерная настройка ширины столбцов
@@ -95,8 +96,7 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
                                    int lakInIPCMessage, // Назовите одинаково с .h
                                    quint32 bcb,       // <--- ИЗМЕНИТЕ ЗДЕСЬ ИМЯ АРГУМЕНТА НА "bcb"
 								   int weight,
-                                   const QString &details)
-{
+                                   const QString &details) {
     if (svmId < 0 || svmId >= MAX_GUI_SVM_INSTANCES || !(m_logTables.size() > svmId && m_logTables[svmId])) {
         qWarning() << "Received message/event for invalid SVM ID or uninitialized table:" << svmId;
         return;
@@ -183,6 +183,46 @@ void MainWindow::onNewMessageOrEvent(int svmId, const QDateTime &timestamp, cons
         // Сброс на "OK" происходит только при получении события "LinkStatus" с активным статусом.
     }
 
+	// Цвет
+    QColor rowColor;
+    if (directionOrEventType == "SENT") {
+        rowColor = QColor(220, 230, 255); // Еще светлее голубой для SENT (пример)
+    } else if (directionOrEventType == "RECV") {
+        rowColor = QColor(220, 255, 220); // Еще светлее зеленый для RECV (пример)
+    } else if (directionOrEventType == "EVENT") {
+        // msgName для EVENT содержит тип события (LinkStatus, ControlFail, и т.д.)
+        // details может содержать дополнительную информацию, включая RSK, TKS
+        bool isError = msgName.contains("Fail", Qt::CaseInsensitive) ||
+                       msgName.contains("Error", Qt::CaseInsensitive) ||
+                       msgName.contains("Timeout", Qt::CaseInsensitive) ||
+                       msgName.contains("Mismatch", Qt::CaseInsensitive) ||
+                       (msgName == "LinkStatus" && details.contains("NewStatus=3")); // 3 = FAILED
+
+        bool isWarning = msgName.contains("Warning", Qt::CaseInsensitive) ||
+                         (msgName == "LinkStatus" && details.contains("NewStatus=5")); // 5 = WARNING
+
+        if (isError) {
+            rowColor = QColor(255, 200, 200); // Светло-красный для ошибок/фейлов
+        } else if (isWarning) {
+            rowColor = QColor(255, 240, 180); // Светло-оранжевый/желтый для предупреждений
+        } else if (msgName == "LinkStatus" && details.contains("NewStatus=2")) { // 2 = ACTIVE
+             rowColor = QColor(200, 255, 200); // Светло-зеленый для LinkStatus=ACTIVE (как RECV)
+        }
+        else {
+            rowColor = QColor(235, 235, 235); // Светло-серый для других событий
+        }
+    } else {
+        rowColor = Qt::white; // По умолчанию (хотя такого случая быть не должно)
+    }
+
+    for (int col = 0; col < table->columnCount(); ++col) {
+        QTableWidgetItem *item = table->item(row, col);
+        if (item) { 
+            item->setBackground(rowColor);
+        }
+    }
+
+	// Листание вниз
     table->scrollToBottom();
     if (table->rowCount() > 200) { // Ограничиваем историю в таблице
         table->removeRow(0);
