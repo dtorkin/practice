@@ -745,10 +745,21 @@ int main(int argc, char *argv[]) {
                 }
 
                 // Этот блок if теперь только для команд ПОДГОТОВКИ К НАБЛЮДЕНИЮ
-                if (command_to_send_prepared_now && link->prep_state != PREP_STATE_PREPARATION_COMPLETE) {
-                    printf("UVM Main (SVM %d): Отправка команды подготовки типа %u (Num %u)...\n", i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num);
+				if (command_to_send_prepared_now && 
+                    link->prep_state != PREP_STATE_PREPARATION_COMPLETE && // Уже было
+                    link->prep_state != PREP_STATE_FAILED) { // Добавим проверку на FAILED здесь тоже
+
+                    // printf("UVM Main (SVM %d): Отправка команды подготовки типа %u (Num %u)...\n", i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num); // Этот printf лучше перенести внутрь if(send_uvm_request)
+
+                    // Вызываем send_uvm_request и СРАЗУ проверяем результат
                     if (send_uvm_request(&request_to_send)) {
+                        // Команда УСПЕШНО поставлена в очередь Sender'a
+                        printf("UVM Main (SVM %d): Команда подготовки типа %u (Num %u) успешно поставлена в очередь.\n",
+                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num);
+
                         link->last_command_sent_time = time(NULL);
+                        // НЕ меняем link->last_sent_prep_cmd_type здесь, он уже установлен в switch
+
                         // Переводим в соответствующее состояние ОЖИДАНИЯ ОТВЕТА
                         if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_INIT_CHANNEL) {
                             link->prep_state = PREP_STATE_AWAITING_CONFIRM_INIT_REPLY;
@@ -759,9 +770,27 @@ int main(int argc, char *argv[]) {
                         } else if (link->last_sent_prep_cmd_type == MESSAGE_TYPE_VYDAT_SOSTOYANIE_LINII) {
                             link->prep_state = PREP_STATE_AWAITING_LINE_STATUS_REPLY;
                         }
-                        printf("UVM Main (SVM %d): Команда подготовки типа %u (Num %u) отправлена. Переход в состояние ожидания %d.\n",
-                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->prep_state);
-                    } else { /* ... обработка ошибки send_uvm_request для команд подготовки ... */ }
+                        printf("UVM Main (SVM %d): Переход в состояние ожидания %d (для ответа на команду типа %u).\n",
+                               i, link->prep_state, link->last_sent_prep_cmd_type);
+                    } else { 
+                        // send_uvm_request ВЕРНУЛ FALSE
+                        // Это может случиться, если, например, link->status НЕ UVM_LINK_ACTIVE внутри send_uvm_request,
+                        // или если очередь была переполнена (маловероятно для uvm_outgoing_request_queue).
+                        fprintf(stderr, "UVM Main (SVM %d): НЕ УДАЛОСЬ поставить команду подготовки типа %u (Num %u) в очередь. Текущий TCP-статус: %d.\n",
+                               i, link->last_sent_prep_cmd_type, link->current_preparation_msg_num, link->status);
+
+                        if (link->prep_state != PREP_STATE_FAILED) { // Чтобы не спамить, если уже FAILED
+                            link->prep_state = PREP_STATE_FAILED;
+                            if (link->status == UVM_LINK_ACTIVE || link->status == UVM_LINK_WARNING) { // Если TCP был еще жив
+                                link->status = UVM_LINK_FAILED; // Понижаем до FAILED
+                                char gui_event_send_fail_main_prep[128];
+                                snprintf(gui_event_send_fail_main_prep, sizeof(gui_event_send_fail_main_prep),
+                                        "EVENT;SVM_ID:%d;Type:LinkStatus;Details:NewStatus=%d,AssignedLAK=0x%02X,Reason=SendFailPrepCmd%u",
+                                        i, UVM_LINK_FAILED, link->assigned_lak, link->last_sent_prep_cmd_type);
+                                send_to_gui_socket(gui_event_send_fail_main_prep);
+                            }
+                        }
+                    }
                     processed_something_this_iteration = true;
                 }
             } // if link active or warning
@@ -1011,6 +1040,7 @@ int main(int argc, char *argv[]) {
                     default: break;
                 }
 
+				printf("DEBUG TIMEOUT_CHECK: SVM %d, TCP Status: %d, Prep State: %d, LastCmdTime: %ld, Now: %ld, TimeoutVal: %ld\n", k_to, link_check_to->status, link_check_to->prep_state, link_check_to->last_command_sent_time, now_main_timeout, current_timeout_val_s);
                 if (current_timeout_val_s > 0 && (now_timeout_check - link_check_to->last_command_sent_time) > current_timeout_val_s) {
                     fprintf(stderr, "UVM Main (SVM %d): ТАЙМАУТ! Ожидался ответ типа %d на команду '%s' (тип %u).\n",
                            k_to, expected_reply_for_timeout_event, cmd_name_for_timeout_event, link_check_to->last_sent_prep_cmd_type);
