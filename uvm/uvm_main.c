@@ -975,6 +975,7 @@ int main(int argc, char *argv[]) {
         for (int k_to = 0; k_to < num_svms_in_config; ++k_to) {
             if (!config.svm_config_loaded[k_to]) continue;
             UvmSvmLink *link_check_to = &svm_links[k_to];
+			printf("DEBUG TIMEOUT_CHECK: SVM %d, TCP Status: %d, Prep State: %d, LastCmdTime: %ld\n", // k_to, link_check_to->status, link_check_to->prep_state, link_check_to->last_command_sent_time);
             
             if (link_check_to->status == UVM_LINK_ACTIVE && // Проверяем только для активных TCP
                 link_check_to->prep_state != PREP_STATE_PREPARATION_COMPLETE &&

@@ -16,7 +16,7 @@
 
 // --- Константы для таймеров ---
 #define TIMER_INTERVAL_BCB_MS 50           // Интервал основного таймера BCB (в миллисекундах)
-#define TIMER_INTERVAL_LINK_STATUS_MS 2000 // Частота эмуляции проверки статуса линии (в миллисекундах)
+#define TIMER_INTERVAL_LINK_STATUS_MS 500 // Частота эмуляции проверки статуса линии (в миллисекундах)
 #define LINK_CHANGE_PROBABILITY 2          // Вероятность изменения LinkUp (1/X)
 #define LINK_LOW_PROBABILITY 10            // Вероятность увеличения времени низкого уровня (1/Y) когда LinkUp меняется
 #define SIGN_DET_CHANGE_PROBABILITY 3      // Вероятность изменения SignDet (1/Z)
