@@ -1000,7 +1000,7 @@ int main(int argc, char *argv[]) {
 
         // === БЛОК 3: ПРОВЕРКА ТАЙМАУТОВ ОЖИДАНИЯ ОТВЕТОВ НА КОМАНДЫ ПОДГОТОВКИ ===
         pthread_mutex_lock(&uvm_links_mutex);
-        time_t now_timeout_check = time(NULL);
+        time_t now_main_timeout = time(NULL); // <--- ОБЪЯВИТЕ И ИНИЦИАЛИЗИРУЙТЕ ЗДЕСЬ;
         for (int k_to = 0; k_to < num_svms_in_config; ++k_to) {
             if (!config.svm_config_loaded[k_to]) continue;
             UvmSvmLink *link_check_to = &svm_links[k_to];
@@ -1041,7 +1041,7 @@ int main(int argc, char *argv[]) {
                 }
 
 				printf("DEBUG TIMEOUT_CHECK: SVM %d, TCP Status: %d, Prep State: %d, LastCmdTime: %ld, Now: %ld, TimeoutVal: %ld\n", k_to, link_check_to->status, link_check_to->prep_state, link_check_to->last_command_sent_time, now_main_timeout, current_timeout_val_s);
-                if (current_timeout_val_s > 0 && (now_timeout_check - link_check_to->last_command_sent_time) > current_timeout_val_s) {
+                if (current_timeout_val_s > 0 && link_check_to->last_command_sent_time > 0 && (now_main_timeout - link_check_to->last_command_sent_time) > current_timeout_val_s) {
                     fprintf(stderr, "UVM Main (SVM %d): ТАЙМАУТ! Ожидался ответ типа %d на команду '%s' (тип %u).\n",
                            k_to, expected_reply_for_timeout_event, cmd_name_for_timeout_event, link_check_to->last_sent_prep_cmd_type);
                     link_check_to->prep_state = PREP_STATE_FAILED;
